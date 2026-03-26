@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rate Limiter — Admin Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            dark: { 800: '#1e1e2e', 700: '#2a2a3d', 600: '#35354a' },
+            accent: '#818cf8',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0f0f1a; }
+    .card { background: #1e1e2e; border: 1px solid #2a2a3d; }
+    .metric-card { transition: transform 0.15s; }
+    .metric-card:hover { transform: translateY(-2px); }
+    .pulse-dot { animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    input[type="number"], select {
+      background: #2a2a3d;
+      border: 1px solid #35354a;
+      color: #e2e8f0;
+    }
+    input[type="number"]:focus, select:focus {
+      border-color: #818cf8;
+      outline: none;
+    }
+    .bar-fill { transition: width 0.5s ease; }
+  </style>
+</head>
+<body class="text-gray-200 min-h-screen">
+  <div class="max-w-7xl mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+      <div>
+        <h1 class="text-3xl font-bold text-white">Rate Limiter Dashboard</h1>
+        <p class="text-gray-500 mt-1">Real-time monitoring & configuration</p>
+      </div>
+      <div class="flex items-center gap-2 text-sm text-gray-400">
+        <span class="pulse-dot w-2 h-2 bg-green-500 rounded-full inline-block"></span>
+        <span id="live-status">Connected</span>
+      </div>
+    </div>
+
+    <!-- Metrics Grid -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+      <div class="card metric-card rounded-xl p-4">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Requests/sec</p>
+        <p class="text-2xl font-bold text-white mt-1" id="m-rps">0</p>
+      </div>
+      <div class="card metric-card rounded-xl p-4">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Blocked</p>
+        <p class="text-2xl font-bold text-red-400 mt-1" id="m-blocked">0</p>
+      </div>
+      <div class="card metric-card rounded-xl p-4">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Avg Latency</p>
+        <p class="text-2xl font-bold text-yellow-400 mt-1" id="m-latency">0ms</p>
+      </div>
+      <div class="card metric-card rounded-xl p-4">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">CPU</p>
+        <p class="text-2xl font-bold text-cyan-400 mt-1" id="m-cpu">0%</p>
+        <div class="w-full bg-dark-600 rounded-full h-1.5 mt-2">
+          <div class="bg-cyan-400 h-1.5 rounded-full bar-fill" id="m-cpu-bar" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="card metric-card rounded-xl p-4">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Memory</p>
+        <p class="text-2xl font-bold text-purple-400 mt-1" id="m-memory">0%</p>
+        <div class="w-full bg-dark-600 rounded-full h-1.5 mt-2">
+          <div class="bg-purple-400 h-1.5 rounded-full bar-fill" id="m-memory-bar" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="card metric-card rounded-xl p-4">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Adaptive Factor</p>
+        <p class="text-2xl font-bold mt-1" id="m-factor">1.00</p>
+        <div class="w-full bg-dark-600 rounded-full h-1.5 mt-2">
+          <div class="bg-accent h-1.5 rounded-full bar-fill" id="m-factor-bar" style="width:100%"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-6">
+
+      <!-- Quick Test -->
+      <div class="card rounded-xl p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">Quick Test</h2>
+        <p class="text-gray-500 text-sm mb-4">Send requests to test rate limiting</p>
+        <div class="flex gap-2 mb-4">
+          <input type="text" id="test-user" placeholder="User ID (e.g. demo-free)" value="demo-free"
+            class="flex-1 rounded-lg px-3 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 focus:border-accent focus:outline-none" />
+          <select id="test-endpoint" class="rounded-lg px-3 py-2 text-sm">
+            <option value="/test">/test</option>
+            <option value="/api/data">/api/data</option>
+            <option value="/api/login">/api/login</option>
+          </select>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-4">
+          <button onclick="sendTest(1)" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition">Send 1</button>
+          <button onclick="sendTest(5)" class="bg-yellow-600 hover:bg-yellow-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition">Send 5</button>
+          <button onclick="sendTest(20)" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition">Burst 20</button>
+          <span class="border-l border-dark-600 mx-1"></span>
+          <input type="number" id="test-count" value="50" min="1" max="1000"
+            class="w-20 rounded-lg px-3 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 focus:border-accent focus:outline-none" />
+          <button onclick="sendTest(+document.getElementById('test-count').value)" class="bg-accent hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition">Send</button>
+          <button onclick="document.getElementById('test-results').innerHTML=''" class="bg-dark-600 hover:bg-dark-500 text-gray-300 px-4 py-2 rounded-lg text-sm font-medium transition">Clear</button>
+        </div>
+        <div id="test-results" class="text-xs font-mono max-h-48 overflow-y-auto space-y-1"></div>
+      </div>
+
+      <!-- Users -->
+      <div class="card rounded-xl p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">Users</h2>
+        <div id="user-list" class="space-y-2 mb-4 max-h-64 overflow-y-auto"></div>
+
+        <div class="flex gap-2 mt-4 pt-4 border-t border-dark-600">
+          <input type="text" id="new-user-id" placeholder="User ID"
+            class="flex-1 rounded-lg px-3 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 placeholder-gray-500 focus:border-accent focus:outline-none" />
+          <select id="new-user-tier" class="rounded-lg px-3 py-2 text-sm">
+            <option value="free">free</option>
+            <option value="pro">pro</option>
+            <option value="enterprise">enterprise</option>
+          </select>
+          <button onclick="addUser()" class="bg-accent hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition">Add</button>
+        </div>
+      </div>
+
+      <!-- Adaptive Config -->
+      <div class="card rounded-xl p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">Adaptive Throttling</h2>
+        <div id="adaptive-config" class="grid grid-cols-2 gap-3"></div>
+        <button onclick="saveAdaptiveConfig()" class="mt-4 bg-accent hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition">Save Changes</button>
+      </div>
+
+      <!-- Tier Configs -->
+      <div class="card rounded-xl p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">Tier Configurations</h2>
+        <div id="tier-configs" class="space-y-3"></div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+const API = '/api/admin';
+
+// ─── Metrics Polling ──────────────────────────────────────
+
+async function fetchMetrics() {
+  try {
+    const res = await fetch(`${API}/metrics`);
+    const d = await res.json();
+
+    document.getElementById('m-rps').textContent = d.requestsPerSecond || 0;
+    document.getElementById('m-blocked').textContent = d.blockedRequests || 0;
+    document.getElementById('m-latency').textContent = (d.avgLatency || 0) + 'ms';
+    document.getElementById('m-cpu').textContent = (d.cpuUsage || 0) + '%';
+    document.getElementById('m-cpu-bar').style.width = (d.cpuUsage || 0) + '%';
+    document.getElementById('m-memory').textContent = (d.memoryUsage || 0) + '%';
+    document.getElementById('m-memory-bar').style.width = (d.memoryUsage || 0) + '%';
+
+    const factor = d.adaptiveFactor ?? 1;
+    document.getElementById('m-factor').textContent = factor.toFixed(2);
+    document.getElementById('m-factor-bar').style.width = (factor * 100) + '%';
+
+    const factorEl = document.getElementById('m-factor');
+    factorEl.className = 'text-2xl font-bold mt-1 ' +
+      (factor >= 0.8 ? 'text-green-400' : factor >= 0.5 ? 'text-yellow-400' : 'text-red-400');
+
+    document.getElementById('live-status').textContent = 'Connected';
+  } catch {
+    document.getElementById('live-status').textContent = 'Disconnected';
+  }
+}
+
+// ─── Tier Configs ─────────────────────────────────────────
+
+async function fetchTierConfigs() {
+  const res = await fetch(`${API}/config/tiers`);
+  const tiers = await res.json();
+  const container = document.getElementById('tier-configs');
+  container.innerHTML = '';
+
+  tiers.forEach(t => {
+    const div = document.createElement('div');
+    div.className = 'bg-dark-700 rounded-lg p-4 flex flex-wrap items-center gap-3';
+    div.innerHTML = `
+      <span class="text-sm font-semibold text-accent w-20">${t.tier}</span>
+      <label class="text-xs text-gray-500">Cap
+        <input type="number" id="cap-${t.tier}" value="${t.default.capacity}" class="w-20 rounded-lg px-2 py-1 text-sm ml-1" />
+      </label>
+      <label class="text-xs text-gray-500">Refill/s
+        <input type="number" id="refill-${t.tier}" value="${t.default.refillRate}" step="0.1" class="w-20 rounded-lg px-2 py-1 text-sm ml-1" />
+      </label>
+      <label class="text-xs text-gray-500">Adaptive Min
+        <input type="number" id="amin-${t.tier}" value="${t.adaptiveMinFactor}" step="0.1" min="0" max="1" class="w-20 rounded-lg px-2 py-1 text-sm ml-1" />
+      </label>
+      <button onclick="saveTierConfig('${t.tier}')" class="ml-auto bg-dark-600 hover:bg-accent text-white px-3 py-1 rounded-lg text-xs font-medium transition">Save</button>
+    `;
+    container.appendChild(div);
+  });
+}
+
+async function saveTierConfig(tier) {
+  const capacity = Number(document.getElementById(`cap-${tier}`).value);
+  const refillRate = Number(document.getElementById(`refill-${tier}`).value);
+  const adaptiveMinFactor = Number(document.getElementById(`amin-${tier}`).value);
+
+  await fetch(`${API}/config/tiers/${tier}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ default: { capacity, refillRate }, adaptiveMinFactor }),
+  });
+  fetchTierConfigs();
+}
+
+// ─── Users ────────────────────────────────────────────────
+
+async function fetchUsers() {
+  const res = await fetch(`${API}/users`);
+  const users = await res.json();
+  const container = document.getElementById('user-list');
+  container.innerHTML = '';
+
+  users.forEach(u => {
+    const div = document.createElement('div');
+    div.className = 'flex items-center gap-3 bg-dark-700 rounded-lg px-4 py-2';
+    div.innerHTML = `
+      <span class="text-sm text-gray-300 flex-1 font-mono">${u.userId}</span>
+      <select id="tier-${u.userId}" class="rounded-lg px-2 py-1 text-sm">
+        <option value="free" ${u.tier === 'free' ? 'selected' : ''}>free</option>
+        <option value="pro" ${u.tier === 'pro' ? 'selected' : ''}>pro</option>
+        <option value="enterprise" ${u.tier === 'enterprise' ? 'selected' : ''}>enterprise</option>
+      </select>
+      <button onclick="updateUser('${u.userId}')" class="bg-dark-600 hover:bg-accent text-white px-3 py-1 rounded-lg text-xs transition">Save</button>
+      <button onclick="deleteUser('${u.userId}')" class="bg-dark-600 hover:bg-red-500 text-white px-3 py-1 rounded-lg text-xs transition">✕</button>
+    `;
+    container.appendChild(div);
+  });
+}
+
+async function updateUser(userId) {
+  const tier = document.getElementById(`tier-${userId}`).value;
+  await fetch(`${API}/users/${userId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tier }),
+  });
+  fetchUsers();
+}
+
+async function deleteUser(userId) {
+  await fetch(`${API}/users/${userId}`, { method: 'DELETE' });
+  fetchUsers();
+}
+
+async function addUser() {
+  const userId = document.getElementById('new-user-id').value.trim();
+  const tier = document.getElementById('new-user-tier').value;
+  if (!userId) return;
+
+  await fetch(`${API}/users/${userId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tier }),
+  });
+  document.getElementById('new-user-id').value = '';
+  fetchUsers();
+}
+
+// ─── Adaptive Config ──────────────────────────────────────
+
+const adaptiveFields = [
+  { key: 'enabled', label: 'Enabled', type: 'checkbox' },
+  { key: 'cpuThresholdHigh', label: 'CPU High %', type: 'number' },
+  { key: 'cpuThresholdLow', label: 'CPU Low %', type: 'number' },
+  { key: 'latencyThresholdMs', label: 'Latency ms', type: 'number' },
+  { key: 'errorRateThreshold', label: 'Error Rate', type: 'number', step: '0.01' },
+  { key: 'minFactor', label: 'Min Factor', type: 'number', step: '0.05' },
+  { key: 'maxFactor', label: 'Max Factor', type: 'number', step: '0.05' },
+  { key: 'adjustmentStep', label: 'Step Size', type: 'number', step: '0.01' },
+];
+
+async function fetchAdaptiveConfig() {
+  const res = await fetch(`${API}/config/adaptive`);
+  const config = await res.json();
+  const container = document.getElementById('adaptive-config');
+  container.innerHTML = '';
+
+  adaptiveFields.forEach(f => {
+    const div = document.createElement('div');
+    if (f.type === 'checkbox') {
+      div.innerHTML = `
+        <label class="flex items-center gap-2 text-sm text-gray-400">
+          <input type="checkbox" id="adapt-${f.key}" ${config[f.key] ? 'checked' : ''} class="accent-indigo-500" />
+          ${f.label}
+        </label>`;
+    } else {
+      div.innerHTML = `
+        <label class="text-xs text-gray-500 block mb-1">${f.label}</label>
+        <input type="number" id="adapt-${f.key}" value="${config[f.key]}" step="${f.step || 1}"
+          class="w-full rounded-lg px-3 py-2 text-sm" />`;
+    }
+    container.appendChild(div);
+  });
+}
+
+async function saveAdaptiveConfig() {
+  const body = {};
+  adaptiveFields.forEach(f => {
+    const el = document.getElementById(`adapt-${f.key}`);
+    body[f.key] = f.type === 'checkbox' ? el.checked : Number(el.value);
+  });
+  await fetch(`${API}/config/adaptive`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  fetchAdaptiveConfig();
+}
+
+// ─── Quick Test ───────────────────────────────────────────
+
+async function sendTest(count) {
+  const userId = document.getElementById('test-user').value;
+  const endpoint = document.getElementById('test-endpoint').value;
+  const results = document.getElementById('test-results');
+  const method = endpoint === '/api/login' ? 'POST' : 'GET';
+
+  const promises = Array.from({ length: count }, () =>
+    fetch(endpoint, { method, headers: { 'x-user-id': userId } })
+      .then(res => ({ status: res.status, remaining: res.headers.get('X-RateLimit-Remaining'), limit: res.headers.get('X-RateLimit-Limit') }))
+      .catch(err => ({ status: 0, remaining: '-', limit: '-', error: err.message }))
+  );
+
+  const responses = await Promise.all(promises);
+
+  let ok = 0, blocked = 0;
+  for (const r of responses) {
+    if (r.status === 200) ok++; else blocked++;
+    const color = r.status === 200 ? 'text-green-400' : 'text-red-400';
+    const line = document.createElement('div');
+    line.className = color;
+    line.textContent = r.error
+      ? `ERR: ${r.error}`
+      : `${r.status} ${r.status === 200 ? 'OK' : 'BLOCKED'} | Remaining: ${r.remaining}/${r.limit}`;
+    results.prepend(line);
+  }
+
+  const summary = document.createElement('div');
+  summary.className = 'text-accent font-bold border-b border-dark-600 pb-1 mb-1';
+  summary.textContent = `── Burst ${count}: ${ok} OK, ${blocked} blocked ──`;
+  results.prepend(summary);
+}
+
+// ─── Init ─────────────────────────────────────────────────
+
+fetchMetrics();
+fetchTierConfigs();
+fetchUsers();
+fetchAdaptiveConfig();
+
+setInterval(fetchMetrics, 2000);
+setInterval(fetchUsers, 10000);
+</script>
+</body>
+</html>

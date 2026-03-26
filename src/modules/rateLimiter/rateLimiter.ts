@@ -37,15 +37,16 @@ export const checkRateLimit = async (
   const result = await runTokenBucketScript(key, scaledRule.capacity, scaledRule.refillRate, now);
   const allowed = result[0] === 1;
   const tokens = result[1];
-  const refillRate = result[2];
 
-  // Retry-After: seconds until 1 token is available
-  const retryAfter = allowed ? 0 : Math.ceil(1 / refillRate);
+  // Use scaledRule.refillRate (not result[2]) because Redis Lua truncates
+  // floats to integers on return — e.g., 0.5 becomes 0, breaking retryAfter
+  const retryAfter = allowed ? 0 : Math.ceil(1 / scaledRule.refillRate);
 
   return {
     allowed,
     tokens,
     limit: scaledRule.capacity,
     retryAfter,
+    refillRate: scaledRule.refillRate,
   };
 };

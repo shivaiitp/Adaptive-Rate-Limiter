@@ -17,8 +17,8 @@ if tokens == nil then
   last_refill = now
 end
 
--- refill tokens
-local delta = math.max(0, now - last_refill)
+-- refill tokens (now is in ms, refill_rate is tokens/sec → convert delta to seconds)
+local delta = math.max(0, (now - last_refill) / 1000)
 local refill = delta * refill_rate
 tokens = math.min(capacity, tokens + refill)
 

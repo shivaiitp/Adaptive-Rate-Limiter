@@ -27,6 +27,7 @@ export interface RateLimitResult {
   tokens: number;
   limit: number;
   retryAfter: number;       // seconds until next token (0 if allowed)
+  refillRate: number;       // tokens per second (after adaptive scaling)
 }
 
 // IETF RateLimit header draft standard

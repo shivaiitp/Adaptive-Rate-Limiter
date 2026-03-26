@@ -1,9 +1,10 @@
 import express from "express";
-import { runTokenBucketScript } from "./core/redis/scripts";
+import { rateLimiter } from "./middleware/rateLimiterMiddleware";
 
 export const app = express();
 
-app.get("/test", async (_, res) => {
-  const val = await runTokenBucketScript("test_key", 10, 1, Date.now());
-  res.json({ val });
+app.use(rateLimiter);
+
+app.get("/test", (_, res) => {
+  res.send("Request allowed");
 });

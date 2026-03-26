@@ -37,7 +37,7 @@ redis.call("HMSET", key,
 
 redis.call("EXPIRE", key, 60)
 
-return {allowed, tokens}
+return {allowed, tokens, refill_rate}
 `;
 
 let tokenBucketScriptSha: string;
@@ -48,5 +48,5 @@ export const loadScripts = async () => {
 };
 
 export const runTokenBucketScript = async (key: string, capacity: number, refillRate: number, now: number) => {
-  return redis.evalsha(tokenBucketScriptSha, 1, key, capacity.toString(), refillRate.toString(), now.toString());
+  return redis.evalsha(tokenBucketScriptSha, 1, key, capacity.toString(), refillRate.toString(), now.toString()) as unknown as [number, number, number];
 };

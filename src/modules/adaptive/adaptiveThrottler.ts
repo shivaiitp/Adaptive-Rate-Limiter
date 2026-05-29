@@ -12,23 +12,24 @@ const evaluate = () => {
   const metrics = getMetrics();
   const currentFactor = getAdaptiveFactor();
 
-  let shouldReduce = false;
+  const stressed =
+    metrics.cpuUsage > config.cpuThresholdHigh ||
+    metrics.avgLatency > config.latencyThresholdMs ||
+    metrics.errorRate > config.errorRateThreshold;
 
-  if (metrics.cpuUsage > config.cpuThresholdHigh) shouldReduce = true;
-  if (metrics.avgLatency > config.latencyThresholdMs) shouldReduce = true;
-  if (metrics.errorRate > config.errorRateThreshold) shouldReduce = true;
+  const healthy =
+    metrics.cpuUsage < config.cpuThresholdLow &&
+    metrics.avgLatency < config.latencyThresholdMs &&
+    metrics.errorRate < config.errorRateThreshold;
 
   let newFactor: number;
 
-  if (shouldReduce) {
-    // System under stress - reduce limits
+  if (stressed) {
     newFactor = Math.max(config.minFactor, currentFactor - config.adjustmentStep);
-  } else if (metrics.cpuUsage < config.cpuThresholdLow) {
-    // System healthy - restore limits gradually
+  } else if (healthy) {
     newFactor = Math.min(config.maxFactor, currentFactor + config.adjustmentStep);
   } else {
-    // In between thresholds - hold steady
-    return;
+    return; // dead zone - hold steady
   }
 
   if (newFactor !== currentFactor) {

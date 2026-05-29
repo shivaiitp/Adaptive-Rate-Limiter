@@ -44,6 +44,7 @@ export interface SystemMetrics {
   memoryUsage: number;        // 0-100
   avgLatency: number;         // ms
   errorRate: number;          // 0-1
+  infraErrors: number;        // Redis/rate-limiter failures excluded from errorRate
   requestsPerSecond: number;
   blockedRequests: number;
   totalRequests: number;

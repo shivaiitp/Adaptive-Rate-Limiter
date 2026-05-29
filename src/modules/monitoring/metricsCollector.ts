@@ -6,6 +6,7 @@ import { logger } from "../../core/logger";
 let totalRequests = 0;
 let blockedRequests = 0;
 let serverErrors = 0;
+let infraErrors = 0;
 let totalLatency = 0;
 let windowStart = Date.now();
 
@@ -15,6 +16,7 @@ let currentMetrics: SystemMetrics = {
   memoryUsage: 0,
   avgLatency: 0,
   errorRate: 0,
+  infraErrors: 0,
   requestsPerSecond: 0,
   blockedRequests: 0,
   totalRequests: 0,
@@ -22,11 +24,18 @@ let currentMetrics: SystemMetrics = {
 };
 
 // Called by the middleware on every request
-// blocked = rate-limited (429), serverError = actual failure (5xx / Redis down)
-export const recordRequest = (blocked: boolean, latencyMs: number, serverError: boolean = false) => {
+// blocked = rate-limited (429), serverError = actual user-visible failure (5xx)
+// infraError = rate limiter infrastructure failure (Redis down, fail-open)
+export const recordRequest = (
+  blocked: boolean,
+  latencyMs: number,
+  serverError: boolean = false,
+  infraError: boolean = false
+) => {
   totalRequests++;
   if (blocked) blockedRequests++;
   if (serverError) serverErrors++;
+  if (infraError) infraErrors++;
   totalLatency += latencyMs;
 };
 
@@ -70,6 +79,7 @@ export const collectMetrics = (): SystemMetrics => {
     memoryUsage: getMemoryUsage(),
     avgLatency: totalRequests > 0 ? Math.round(totalLatency / totalRequests) : 0,
     errorRate: totalRequests > 0 ? serverErrors / totalRequests : 0,
+    infraErrors,
     requestsPerSecond: windowDuration > 0 ? Math.round(totalRequests / windowDuration) : 0,
     blockedRequests,
     totalRequests,
@@ -80,23 +90,26 @@ export const collectMetrics = (): SystemMetrics => {
   totalRequests = 0;
   blockedRequests = 0;
   serverErrors = 0;
+  infraErrors = 0;
   totalLatency = 0;
   windowStart = now;
 
   return currentMetrics;
 };
 
-// Get a live view of metrics - merges current window data with system stats
-// so the dashboard always sees up-to-date numbers, not a stale snapshot
+// Live view - uses cached CPU/memory from the last collection,
+// merged with current-window request stats so the dashboard sees
+// up-to-the-second numbers without racing the CPU sampler.
 export const getMetrics = (): SystemMetrics => {
   const now = Date.now();
   const windowDuration = (now - windowStart) / 1000;
 
   return {
-    cpuUsage: getCpuUsage(),
-    memoryUsage: getMemoryUsage(),
+    cpuUsage: currentMetrics.cpuUsage,
+    memoryUsage: currentMetrics.memoryUsage,
     avgLatency: totalRequests > 0 ? Math.round(totalLatency / totalRequests) : currentMetrics.avgLatency,
     errorRate: totalRequests > 0 ? serverErrors / totalRequests : currentMetrics.errorRate,
+    infraErrors: totalRequests > 0 ? infraErrors : currentMetrics.infraErrors,
     requestsPerSecond: windowDuration > 0 ? +(totalRequests / windowDuration).toFixed(1) : 0,
     blockedRequests: totalRequests > 0 ? blockedRequests : currentMetrics.blockedRequests,
     totalRequests: totalRequests > 0 ? totalRequests : currentMetrics.totalRequests,

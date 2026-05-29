@@ -28,7 +28,9 @@ export const rateLimiter = async (
     res.setHeader("X-RateLimit-Limit", result.limit);
     res.setHeader("X-RateLimit-Remaining", Math.floor(result.tokens));
     // Seconds until bucket is fully refilled (token bucket has no fixed window)
-    const resetSeconds = Math.ceil((result.limit - result.tokens) / result.refillRate);
+    const resetSeconds = result.refillRate > 0
+      ? Math.max(0, Math.ceil((result.limit - result.tokens) / result.refillRate))
+      : 0;
     res.setHeader("X-RateLimit-Reset", resetSeconds);
 
     if (!result.allowed) {
@@ -42,7 +44,7 @@ export const rateLimiter = async (
     next();
   } catch (err) {
     const latency = Date.now() - start;
-    recordRequest(false, latency, true); // true = server error (Redis down, etc.)
+    recordRequest(false, latency, false, true); // infra error: don't poison errorRate
     logger.error("Rate limiter error:", err);
     // Fail-open: allow request if rate limiter fails.
     next();

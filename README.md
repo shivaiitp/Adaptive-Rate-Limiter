@@ -2,6 +2,22 @@
 
 A production-style, real-time rate limiting project built with **Node.js**, **TypeScript**, **Redis**, and **Express**. It uses the **Token Bucket algorithm** executed atomically via **Redis Lua scripting**, with an **adaptive throttling engine** that dynamically adjusts rate limits based on live system health metrics.
 
+## Quick Start (Docker)
+
+```bash
+docker compose up
+```
+
+- App: [http://localhost:3000](http://localhost:3000)
+- Admin dashboard: [http://localhost:3000/admin](http://localhost:3000/admin)
+- Health: [http://localhost:3000/health](http://localhost:3000/health)
+
+Try a request:
+
+```bash
+curl -H "x-api-key: demo-pro-key" http://localhost:3000/test
+```
+
 ---
 
 ## Why This Project?
@@ -89,7 +105,7 @@ Each user gets a separate token bucket **per endpoint** in Redis. The bucket:
 
 This allows **bursts** (use all 5 tokens instantly) while enforcing a **sustained rate** (1 request/second after the burst). The entire check-and-update runs as a single **Lua script inside Redis**, making it atomic — no race conditions even with thousands of concurrent requests.
 
-**Redis key pattern:** `rate_limit:{userId}:{endpoint}`
+**Redis key pattern:** `rate_limit:{userId}:{matchedEndpoint}` where `matchedEndpoint` is an exact/segment-aware override like `/api/login`, or `default` for tier defaults.
 
 ### Tiered Rate Limiting
 
@@ -278,7 +294,7 @@ A real-time monitoring dashboard accessible at `/admin`:
 | **Token Bucket over Sliding Window** | Allows natural bursts while enforcing sustained rates — more closely models real API usage patterns |
 | **Lua scripting over Node.js logic** | Atomic execution inside Redis — eliminates race conditions without distributed locks |
 | **EVALSHA over EVAL** | Script is loaded once, called by hash — saves ~460 bytes of network traffic per request |
-| **Per-user-per-endpoint buckets** | Using up tokens on `/test` doesn't block `/api/data` — prevents cross-endpoint interference |
+| **Per-user-per-rule buckets** | Requests use the matched override key or the tier default key, preventing path-variant bypasses like `/api/loginhistory` |
 | **In-memory config (Map)** | O(1) lookups on every request — a database call would add 5-50ms of latency per request |
 | **Fail-open on Redis failure** | A broken rate limiter shouldn't take down the entire API — availability over strictness |
 | **Separate server errors from 429s** | Rate limit blocks (429) are intentional — only real server failures (5xx) should trigger adaptive throttling |
@@ -326,6 +342,26 @@ The Lua script returned `refill_rate` back to Node.js so it could calculate `Ret
 
 ---
 
+## Performance
+
+Tested with k6 against a single-node setup (Docker, local Redis):
+
+| Scenario | Throughput | p50 | p95 | p99 |
+|---|---|---|---|---|
+| Steady (100 VUs) | TODO req/s | TODO | TODO | TODO |
+| Burst (1k VUs) | TODO req/s | TODO | TODO | TODO |
+
+Free-tier users correctly throttle at 1 req/s; pro tier sustains 10 req/s; enterprise sustains 100 req/s.
+
+## Known Limitations & Future Work
+
+- **Config & users are in-memory** - admin API edits are lost on restart, and multiple instances diverge. Production version would persist to Redis with pub/sub invalidation.
+- **Adaptive factor is per-process** - under uneven load, two nodes may compute different factors. Could be centralized in Redis.
+- **Single-region only** - no replication/failover for the Redis dependency.
+- **No structured logging** - current logger is console.log; production would use pino/winston with JSON output.
+
+---
+
 ## Running Locally
 
 ### Prerequisites
@@ -354,10 +390,10 @@ Create a `.env` file in the root. You can start from `.env.example`:
 PORT=3000
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
-# Optional: require this header for admin API calls
+# Required for admin API access. Set to a long random string in production.
 ADMIN_API_KEY=change-me
-# Optional: require x-api-key for demo API requests
-REQUIRE_API_KEY=false
+# When true, requests must include x-api-key. Recommended.
+REQUIRE_API_KEY=true
 ```
 
 ### 4. Start Redis
@@ -407,19 +443,19 @@ Navigate to [http://localhost:3000/admin](http://localhost:3000/admin) to access
 **Using curl:**
 ```bash
 # Single request as free-tier user
-curl -H "x-user-id: demo-free" http://localhost:3000/test
-
-# If REQUIRE_API_KEY=true
 curl -H "x-api-key: demo-free-key" http://localhost:3000/test
 
+# If REQUIRE_API_KEY=false, x-user-id is also supported
+curl -H "x-user-id: demo-free" http://localhost:3000/test
+
 # Burst 10 requests (some will get 429)
-for i in {1..10}; do curl -s -o /dev/null -w "%{http_code}\n" -H "x-user-id: demo-free" http://localhost:3000/test; done
+for i in {1..10}; do curl -s -o /dev/null -w "%{http_code}\n" -H "x-api-key: demo-free-key" http://localhost:3000/test; done
 
 # Enterprise user (500 token capacity)
-curl -H "x-user-id: demo-enterprise" http://localhost:3000/test
+curl -H "x-api-key: demo-enterprise-key" http://localhost:3000/test
 
 # Check rate limit headers
-curl -v -H "x-user-id: demo-free" http://localhost:3000/test 2>&1 | grep -i "x-ratelimit\|retry-after"
+curl -v -H "x-api-key: demo-free-key" http://localhost:3000/test 2>&1 | grep -i "x-ratelimit\|retry-after"
 ```
 
 **Pre-seeded demo users:** `demo-free`, `demo-pro`, `demo-enterprise`

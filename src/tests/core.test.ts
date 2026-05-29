@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getAdaptiveConfig,
+  getMatchedEndpointKey,
   getRuleForRequest,
   resetToDefaults,
   updateTierConfig,
@@ -75,4 +76,12 @@ test("demo API keys map to stable user ids", () => {
   assert.equal(getUserIdByApiKey("demo-free-key"), "demo-free");
   assert.equal(getUserIdByApiKey("demo-pro-key"), "demo-pro");
   assert.equal(getUserIdByApiKey("missing-key"), undefined);
+});
+
+test("endpoint matching is segment-aware (not naive prefix)", () => {
+  resetToDefaults();
+
+  assert.equal(getMatchedEndpointKey("free", "/api/login"), "/api/login");
+  assert.equal(getMatchedEndpointKey("free", "/api/login/refresh"), "/api/login");
+  assert.equal(getMatchedEndpointKey("free", "/api/loginhistory"), "default");
 });

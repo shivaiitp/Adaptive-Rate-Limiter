@@ -8,7 +8,6 @@ local capacity = tonumber(ARGV[1])
 local refill_rate = tonumber(ARGV[2])
 local now = tonumber(ARGV[3])
 
--- fetch current state
 local data = redis.call("HMGET", key, "tokens", "last_refill")
 local tokens = tonumber(data[1])
 local last_refill = tonumber(data[2])
@@ -18,19 +17,16 @@ if tokens == nil then
   last_refill = now
 end
 
--- refill tokens (now is in ms, refill_rate is tokens/sec - convert delta to seconds)
 local delta = math.max(0, (now - last_refill) / 1000)
 local refill = delta * refill_rate
 tokens = math.min(capacity, tokens + refill)
 
--- check if request can be allowed
 local allowed = 0
 if tokens >= 1 then
   allowed = 1
   tokens = tokens - 1
 end
 
--- update state
 redis.call("HSET", key,
   "tokens", tokens,
   "last_refill", now
@@ -42,10 +38,17 @@ if refill_rate > 0 then
 end
 redis.call("EXPIRE", key, ttl)
 
-return {allowed, tokens, refill_rate}
+-- retry_after_ms: time until tokens >= 1 (0 if already allowed)
+local retry_after_ms = 0
+if allowed == 0 and refill_rate > 0 then
+  retry_after_ms = math.ceil(((1 - tokens) / refill_rate) * 1000)
+end
+
+return {allowed, tokens, refill_rate, retry_after_ms}
 `;
 
 let tokenBucketScriptSha: string | undefined;
+let loadPromise: Promise<void> | undefined;
 
 const isNoScriptError = (err: unknown): boolean => {
   return err instanceof Error && err.message.includes("NOSCRIPT");
@@ -57,9 +60,12 @@ export const loadScripts = async () => {
 };
 
 const getTokenBucketScriptSha = async (): Promise<string> => {
-  if (!tokenBucketScriptSha) {
-    await loadScripts();
+  if (tokenBucketScriptSha) return tokenBucketScriptSha;
+
+  if (!loadPromise) {
+    loadPromise = loadScripts().finally(() => { loadPromise = undefined; });
   }
+  await loadPromise;
 
   if (!tokenBucketScriptSha) {
     throw new Error("Redis Lua script SHA is unavailable");
@@ -68,7 +74,12 @@ const getTokenBucketScriptSha = async (): Promise<string> => {
   return tokenBucketScriptSha;
 };
 
-export const runTokenBucketScript = async (key: string, capacity: number, refillRate: number, now: number) => {
+export const runTokenBucketScript = async (
+  key: string,
+  capacity: number,
+  refillRate: number,
+  now: number
+): Promise<[number, number, number, number]> => {
   let scriptSha = await getTokenBucketScriptSha();
 
   let rawResult: unknown;
@@ -84,10 +95,10 @@ export const runTokenBucketScript = async (key: string, capacity: number, refill
     rawResult = await redis.evalsha(scriptSha, 1, key, capacity.toString(), refillRate.toString(), now.toString());
   }
 
-  if (!Array.isArray(rawResult) || rawResult.length < 3) {
+  if (!Array.isArray(rawResult) || rawResult.length < 4) {
     throw new Error("Unexpected Redis script return value");
   }
 
-  const [allowed, tokens, refillRateResult] = rawResult.map((value) => Number(value)) as [number, number, number];
-  return [allowed, tokens, refillRateResult];
+  const [allowed, tokens, refillRateResult, retryAfterMs] = rawResult.map((value) => Number(value)) as [number, number, number, number];
+  return [allowed, tokens, refillRateResult, retryAfterMs];
 };

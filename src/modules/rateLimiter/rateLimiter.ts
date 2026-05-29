@@ -1,5 +1,5 @@
 import { RateLimitResult, RateLimitRule, UserTier } from "../../types";
-import { getRuleForRequest, getAdaptiveMinFactor } from "../../config/configService";
+import { getRuleForRequest, getAdaptiveMinFactor, getMatchedEndpointKey } from "../../config/configService";
 import { runTokenBucketScript } from "../../core/redis/scripts";
 
 // Current adaptive factor - updated by the adaptive throttler (Step 5)
@@ -8,7 +8,7 @@ let adaptiveFactor = 1.0;
 
 export const setAdaptiveFactor = (factor: number) => {
   if (!Number.isFinite(factor)) return;
-  adaptiveFactor = Math.max(0, Math.min(1, factor));
+  adaptiveFactor = Math.max(0, factor);
 };
 
 export const getAdaptiveFactor = (): number => adaptiveFactor;
@@ -32,21 +32,20 @@ export const checkRateLimit = async (
   const baseRule = getRuleForRequest(tier, endpoint);
   const scaledRule = applyAdaptiveScaling(baseRule, tier);
 
-  const key = `rate_limit:${userId}:${endpoint}`;
+  const matchedEndpoint = getMatchedEndpointKey(tier, endpoint);
+  const key = `rate_limit:${userId}:${matchedEndpoint}`;
   const now = Date.now();
 
   const result = await runTokenBucketScript(key, scaledRule.capacity, scaledRule.refillRate, now);
   const allowed = result[0] === 1;
   const tokens = result[1];
-
-  // Use scaledRule.refillRate because Redis Lua returns values that may truncate
-  const retryAfter = allowed ? 0 : Math.ceil(scaledRule.refillRate > 0 ? 1 / scaledRule.refillRate : 1);
+  const retryAfterMs = result[3] ?? 0;
 
   return {
     allowed,
     tokens,
     limit: scaledRule.capacity,
-    retryAfter,
+    retryAfter: Math.max(0, Math.ceil(retryAfterMs / 1000)),
     refillRate: scaledRule.refillRate,
   };
 };

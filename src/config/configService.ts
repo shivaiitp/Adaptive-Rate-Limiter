@@ -56,12 +56,23 @@ export const getRuleForRequest = (tier: UserTier, endpoint: string): RateLimitRu
   const config = tierMap.get(tier);
 
   if (!config) {
-    // Fallback: unknown tier gets free-tier limits
     return { capacity: 5, refillRate: 1 };
   }
 
-  const override = config.endpoints?.find((e: EndpointOverride) => endpoint.startsWith(e.endpoint));
+  const override = config.endpoints?.find((e: EndpointOverride) => {
+    return endpoint === e.endpoint || endpoint.startsWith(e.endpoint + "/");
+  });
   return override ? override.rule : config.default;
+};
+
+export const getMatchedEndpointKey = (tier: UserTier, endpoint: string): string => {
+  const config = tierMap.get(tier);
+  if (!config) return "default";
+
+  const override = config.endpoints?.find((e: EndpointOverride) => {
+    return endpoint === e.endpoint || endpoint.startsWith(e.endpoint + "/");
+  });
+  return override ? override.endpoint : "default";
 };
 
 export const getAdaptiveMinFactor = (tier: UserTier): number => {

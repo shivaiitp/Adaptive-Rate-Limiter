@@ -14,11 +14,11 @@ app.use("/admin", express.static(path.join(__dirname, "../public")));
 // Health check (no rate limiting)
 app.use(healthRouter);
 
-// Rate limiter applies to all routes below
-app.use(rateLimiter);
-
-// Admin API (rate limited like other routes)
+// Admin API uses its own optional x-admin-api-key guard.
 app.use("/api/admin", adminRouter);
+
+// Rate limiter applies to demo API routes below.
+app.use(rateLimiter);
 
 // Demo endpoints
 app.get("/test", (_, res) => {

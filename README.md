@@ -1,6 +1,6 @@
 # Distributed Adaptive Rate Limiter
 
-A production-grade, real-time rate limiting system built with **Node.js**, **TypeScript**, **Redis**, and **Express**. It uses the **Token Bucket algorithm** executed atomically via **Redis Lua scripting**, with an **adaptive throttling engine** that dynamically adjusts rate limits based on live system health metrics.
+A production-style, real-time rate limiting project built with **Node.js**, **TypeScript**, **Redis**, and **Express**. It uses the **Token Bucket algorithm** executed atomically via **Redis Lua scripting**, with an **adaptive throttling engine** that dynamically adjusts rate limits based on live system health metrics.
 
 ---
 
@@ -49,7 +49,7 @@ graph TD
         I3["Instance 3"]
     end
 
-    RL_Cluster -->|Check/Update Tokens| Redis[("Redis Cluster")]
+    RL_Cluster -->|Check/Update Tokens| Redis[("Redis")]
     RL_Cluster -->|Fetch Config| Config["Config Service"]
     RL_Cluster -->|Send Metrics| Monitoring["Monitoring System"]
 
@@ -66,7 +66,7 @@ graph TD
 | 1 | **Client** | Sends API requests with a `user_id` / API key. Can generate burst or normal traffic. |
 | 2 | **API Gateway** | Entry point — handles auth, routing, and extracts user + endpoint. Forwards request to a rate limiter instance. |
 | 3 | **Rate Limiter Service (Cluster)** | Stateless instances that apply token bucket + adaptive logic. Fetch config, check/update Redis, return allow/reject. |
-| 4 | **Redis Cluster** | Stores tokens and last refill timestamps per user/endpoint. Uses atomic ops (Lua scripts) to avoid race conditions. |
+| 4 | **Redis** | Stores tokens and last refill timestamps per user/endpoint. Uses atomic ops (Lua scripts) to avoid race conditions. The demo uses a single Redis instance; it can be adapted to Redis Cluster. |
 | 5 | **Config Service** | Provides dynamic rate limits per user tier and endpoint. Updates instantly without restarting the rate limiter. |
 | 6 | **Config DB** | Stores persistent configs like user plans and limits. Config service reads/writes from here. *(In our demo: in-memory Map)* |
 | 7 | **Monitoring System** | Collects metrics: request rate, blocked count, latency, CPU, memory. Feeds data for adaptive throttling decisions. |
@@ -348,12 +348,16 @@ npm install
 
 ### 3. Configure environment
 
-Create a `.env` file in the root (or use the existing one):
+Create a `.env` file in the root. You can start from `.env.example`:
 
 ```env
 PORT=3000
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
+# Optional: require this header for admin API calls
+ADMIN_API_KEY=change-me
+# Optional: require x-api-key for demo API requests
+REQUIRE_API_KEY=false
 ```
 
 ### 4. Start Redis
@@ -374,12 +378,21 @@ redis-server
 npm run dev
 ```
 
+Useful scripts:
+
+```bash
+npm run build      # compile TypeScript into dist/
+npm run start      # run the compiled server
+npm run typecheck  # type-check without emitting files
+npm test           # build and run the Node test suite
+```
+
 You should see:
 ```
-✅ Redis connected
-✅ Lua script loaded: <sha-hash>
-✅ Metrics collection started (every 5000ms)
-✅ Adaptive throttling started (every 5000ms)
+Redis connected
+Lua script loaded: <sha-hash>
+Metrics collection started (every 5000ms)
+Adaptive throttling started (every 5000ms)
 Server running on port 3000
 ```
 
@@ -396,6 +409,9 @@ Navigate to [http://localhost:3000/admin](http://localhost:3000/admin) to access
 # Single request as free-tier user
 curl -H "x-user-id: demo-free" http://localhost:3000/test
 
+# If REQUIRE_API_KEY=true
+curl -H "x-api-key: demo-free-key" http://localhost:3000/test
+
 # Burst 10 requests (some will get 429)
 for i in {1..10}; do curl -s -o /dev/null -w "%{http_code}\n" -H "x-user-id: demo-free" http://localhost:3000/test; done
 
@@ -407,6 +423,8 @@ curl -v -H "x-user-id: demo-free" http://localhost:3000/test 2>&1 | grep -i "x-r
 ```
 
 **Pre-seeded demo users:** `demo-free`, `demo-pro`, `demo-enterprise`
+
+**Pre-seeded demo API keys:** `demo-free-key`, `demo-pro-key`, `demo-enterprise-key`
 
 ---
 

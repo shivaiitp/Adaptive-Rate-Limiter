@@ -1,14 +1,15 @@
 import os from "os";
 import { SystemMetrics } from "../../types";
+import { logger } from "../../core/logger";
 
-// Rolling window counters — reset every evaluation cycle
+// Rolling window counters - reset every evaluation cycle
 let totalRequests = 0;
 let blockedRequests = 0;
 let serverErrors = 0;
 let totalLatency = 0;
 let windowStart = Date.now();
 
-// Latest snapshot — consumed by adaptive throttler & admin dashboard
+// Latest snapshot - consumed by adaptive throttler & admin dashboard
 let currentMetrics: SystemMetrics = {
   cpuUsage: 0,
   memoryUsage: 0,
@@ -29,7 +30,7 @@ export const recordRequest = (blocked: boolean, latencyMs: number, serverError: 
   totalLatency += latencyMs;
 };
 
-// CPU usage — track previous reading to compute delta (real-time usage)
+// CPU usage - track previous reading to compute delta (real-time usage)
 let prevCpuIdle = 0;
 let prevCpuTotal = 0;
 
@@ -85,7 +86,7 @@ export const collectMetrics = (): SystemMetrics => {
   return currentMetrics;
 };
 
-// Get a live view of metrics — merges current window data with system stats
+// Get a live view of metrics - merges current window data with system stats
 // so the dashboard always sees up-to-date numbers, not a stale snapshot
 export const getMetrics = (): SystemMetrics => {
   const now = Date.now();
@@ -109,7 +110,7 @@ let collectionInterval: ReturnType<typeof setInterval> | null = null;
 export const startMetricsCollection = (intervalMs: number = 5000) => {
   if (collectionInterval) return;
   collectionInterval = setInterval(collectMetrics, intervalMs);
-  console.log(`✅ Metrics collection started (every ${intervalMs}ms)`);
+  logger.info(`Metrics collection started (every ${intervalMs}ms)`);
 };
 
 export const stopMetricsCollection = () => {

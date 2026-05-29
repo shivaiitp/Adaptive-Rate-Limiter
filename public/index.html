@@ -100,6 +100,8 @@
         <div class="flex gap-2 mb-4">
           <input type="text" id="test-user" placeholder="User ID (e.g. demo-free)" value="demo-free"
             class="flex-1 rounded-lg px-3 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 focus:border-accent focus:outline-none" />
+          <input type="text" id="test-api-key" placeholder="API key"
+            class="flex-1 rounded-lg px-3 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 focus:border-accent focus:outline-none" />
           <select id="test-endpoint" class="rounded-lg px-3 py-2 text-sm">
             <option value="/test">/test</option>
             <option value="/api/data">/api/data</option>
@@ -154,12 +156,29 @@
 
 <script>
 const API = '/api/admin';
+const USER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,80}$/;
+let adminApiKey = localStorage.getItem('adminApiKey') || '';
 
-// ─── Metrics Polling ──────────────────────────────────────
+async function adminFetch(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (adminApiKey) headers['x-admin-api-key'] = adminApiKey;
+
+  const res = await fetch(`${API}${path}`, { ...options, headers });
+  if (res.status !== 401) return res;
+
+  const nextKey = window.prompt('Admin API key');
+  if (!nextKey) return res;
+
+  adminApiKey = nextKey;
+  localStorage.setItem('adminApiKey', nextKey);
+  return adminFetch(path, options);
+}
+
+// Metrics polling
 
 async function fetchMetrics() {
   try {
-    const res = await fetch(`${API}/metrics`);
+    const res = await adminFetch('/metrics');
     const d = await res.json();
 
     document.getElementById('m-rps').textContent = d.requestsPerSecond || 0;
@@ -184,10 +203,10 @@ async function fetchMetrics() {
   }
 }
 
-// ─── Tier Configs ─────────────────────────────────────────
+// Tier configs
 
 async function fetchTierConfigs() {
-  const res = await fetch(`${API}/config/tiers`);
+  const res = await adminFetch('/config/tiers');
   const tiers = await res.json();
   const container = document.getElementById('tier-configs');
   container.innerHTML = '';
@@ -217,7 +236,7 @@ async function saveTierConfig(tier) {
   const refillRate = Number(document.getElementById(`refill-${tier}`).value);
   const adaptiveMinFactor = Number(document.getElementById(`amin-${tier}`).value);
 
-  await fetch(`${API}/config/tiers/${tier}`, {
+  await adminFetch(`/config/tiers/${tier}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ default: { capacity, refillRate }, adaptiveMinFactor }),
@@ -225,34 +244,49 @@ async function saveTierConfig(tier) {
   fetchTierConfigs();
 }
 
-// ─── Users ────────────────────────────────────────────────
+// Users
 
 async function fetchUsers() {
-  const res = await fetch(`${API}/users`);
+  const res = await adminFetch('/users');
   const users = await res.json();
   const container = document.getElementById('user-list');
-  container.innerHTML = '';
+  container.replaceChildren();
 
   users.forEach(u => {
     const div = document.createElement('div');
     div.className = 'flex items-center gap-3 bg-dark-700 rounded-lg px-4 py-2';
-    div.innerHTML = `
-      <span class="text-sm text-gray-300 flex-1 font-mono">${u.userId}</span>
-      <select id="tier-${u.userId}" class="rounded-lg px-2 py-1 text-sm">
-        <option value="free" ${u.tier === 'free' ? 'selected' : ''}>free</option>
-        <option value="pro" ${u.tier === 'pro' ? 'selected' : ''}>pro</option>
-        <option value="enterprise" ${u.tier === 'enterprise' ? 'selected' : ''}>enterprise</option>
-      </select>
-      <button onclick="updateUser('${u.userId}')" class="bg-dark-600 hover:bg-accent text-white px-3 py-1 rounded-lg text-xs transition">Save</button>
-      <button onclick="deleteUser('${u.userId}')" class="bg-dark-600 hover:bg-red-500 text-white px-3 py-1 rounded-lg text-xs transition">✕</button>
-    `;
+
+    const name = document.createElement('span');
+    name.className = 'text-sm text-gray-300 flex-1 font-mono';
+    name.textContent = u.userId;
+
+    const select = document.createElement('select');
+    select.className = 'rounded-lg px-2 py-1 text-sm';
+    ['free', 'pro', 'enterprise'].forEach(tier => {
+      const option = document.createElement('option');
+      option.value = tier;
+      option.textContent = tier;
+      option.selected = u.tier === tier;
+      select.appendChild(option);
+    });
+
+    const save = document.createElement('button');
+    save.className = 'bg-dark-600 hover:bg-accent text-white px-3 py-1 rounded-lg text-xs transition';
+    save.textContent = 'Save';
+    save.addEventListener('click', () => updateUser(u.userId, select.value));
+
+    const remove = document.createElement('button');
+    remove.className = 'bg-dark-600 hover:bg-red-500 text-white px-3 py-1 rounded-lg text-xs transition';
+    remove.textContent = 'X';
+    remove.addEventListener('click', () => deleteUser(u.userId));
+
+    div.append(name, select, save, remove);
     container.appendChild(div);
   });
 }
 
-async function updateUser(userId) {
-  const tier = document.getElementById(`tier-${userId}`).value;
-  await fetch(`${API}/users/${userId}`, {
+async function updateUser(userId, tier) {
+  await adminFetch(`/users/${encodeURIComponent(userId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tier }),
@@ -261,7 +295,7 @@ async function updateUser(userId) {
 }
 
 async function deleteUser(userId) {
-  await fetch(`${API}/users/${userId}`, { method: 'DELETE' });
+  await adminFetch(`/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
   fetchUsers();
 }
 
@@ -269,8 +303,12 @@ async function addUser() {
   const userId = document.getElementById('new-user-id').value.trim();
   const tier = document.getElementById('new-user-tier').value;
   if (!userId) return;
+  if (!USER_ID_PATTERN.test(userId)) {
+    window.alert('User ID must be 1-80 chars: letters, numbers, dot, underscore, colon, or hyphen.');
+    return;
+  }
 
-  await fetch(`${API}/users/${userId}`, {
+  await adminFetch(`/users/${encodeURIComponent(userId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tier }),
@@ -279,7 +317,7 @@ async function addUser() {
   fetchUsers();
 }
 
-// ─── Adaptive Config ──────────────────────────────────────
+// Adaptive config
 
 const adaptiveFields = [
   { key: 'enabled', label: 'Enabled', type: 'checkbox' },
@@ -293,7 +331,7 @@ const adaptiveFields = [
 ];
 
 async function fetchAdaptiveConfig() {
-  const res = await fetch(`${API}/config/adaptive`);
+  const res = await adminFetch('/config/adaptive');
   const config = await res.json();
   const container = document.getElementById('adaptive-config');
   container.innerHTML = '';
@@ -322,7 +360,7 @@ async function saveAdaptiveConfig() {
     const el = document.getElementById(`adapt-${f.key}`);
     body[f.key] = f.type === 'checkbox' ? el.checked : Number(el.value);
   });
-  await fetch(`${API}/config/adaptive`, {
+  await adminFetch('/config/adaptive', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -330,16 +368,18 @@ async function saveAdaptiveConfig() {
   fetchAdaptiveConfig();
 }
 
-// ─── Quick Test ───────────────────────────────────────────
+// Quick test
 
 async function sendTest(count) {
   const userId = document.getElementById('test-user').value;
+  const apiKey = document.getElementById('test-api-key').value.trim();
   const endpoint = document.getElementById('test-endpoint').value;
   const results = document.getElementById('test-results');
   const method = endpoint === '/api/login' ? 'POST' : 'GET';
+  const headers = apiKey ? { 'x-api-key': apiKey } : { 'x-user-id': userId };
 
   const promises = Array.from({ length: count }, () =>
-    fetch(endpoint, { method, headers: { 'x-user-id': userId } })
+    fetch(endpoint, { method, headers })
       .then(res => ({ status: res.status, remaining: res.headers.get('X-RateLimit-Remaining'), limit: res.headers.get('X-RateLimit-Limit') }))
       .catch(err => ({ status: 0, remaining: '-', limit: '-', error: err.message }))
   );
@@ -360,11 +400,11 @@ async function sendTest(count) {
 
   const summary = document.createElement('div');
   summary.className = 'text-accent font-bold border-b border-dark-600 pb-1 mb-1';
-  summary.textContent = `── Burst ${count}: ${ok} OK, ${blocked} blocked ──`;
+  summary.textContent = `Burst ${count}: ${ok} OK, ${blocked} blocked`;
   results.prepend(summary);
 }
 
-// ─── Init ─────────────────────────────────────────────────
+// Init
 
 fetchMetrics();
 fetchTierConfigs();

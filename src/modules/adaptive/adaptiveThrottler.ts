@@ -1,9 +1,9 @@
 import { getAdaptiveConfig } from "../../config/configService";
 import { getMetrics } from "../monitoring/metricsCollector";
 import { setAdaptiveFactor, getAdaptiveFactor } from "../rateLimiter/rateLimiter";
+import { logger } from "../../core/logger";
 
-// Evaluates system health and adjusts the adaptive factor accordingly
-// Runs on a timer — checks metrics, decides to throttle up or down
+// Periodically evaluate system health and adjust the adaptive factor
 
 const evaluate = () => {
   const config = getAdaptiveConfig();
@@ -21,37 +21,37 @@ const evaluate = () => {
   let newFactor: number;
 
   if (shouldReduce) {
-    // System under stress → reduce limits
+    // System under stress - reduce limits
     newFactor = Math.max(config.minFactor, currentFactor - config.adjustmentStep);
   } else if (metrics.cpuUsage < config.cpuThresholdLow) {
-    // System healthy → restore limits gradually
+    // System healthy - restore limits gradually
     newFactor = Math.min(config.maxFactor, currentFactor + config.adjustmentStep);
   } else {
-    // In between thresholds → hold steady
+    // In between thresholds - hold steady
     return;
   }
 
   if (newFactor !== currentFactor) {
     setAdaptiveFactor(newFactor);
-    console.log(
-      `Adaptive factor: ${currentFactor.toFixed(2)} → ${newFactor.toFixed(2)} | ` +
+    logger.info(
+      `Adaptive factor: ${currentFactor.toFixed(2)} -> ${newFactor.toFixed(2)} | ` +
       `CPU: ${metrics.cpuUsage}% | Latency: ${metrics.avgLatency}ms | ErrorRate: ${(metrics.errorRate * 100).toFixed(1)}%`
     );
   }
-}; 
+};
 
 let evaluationInterval: ReturnType<typeof setInterval> | null = null;
 
 export const startAdaptiveThrottling = () => {
   const config = getAdaptiveConfig();
   if (!config.enabled) {
-    console.log("⚠️ Adaptive throttling is disabled");
+    logger.info("Adaptive throttling is disabled");
     return;
   }
 
   if (evaluationInterval) return;
   evaluationInterval = setInterval(evaluate, config.evaluationIntervalMs);
-  console.log(`✅ Adaptive throttling started (every ${config.evaluationIntervalMs}ms)`);
+  logger.info(`Adaptive throttling started (every ${config.evaluationIntervalMs}ms)`);
 };
 
 export const stopAdaptiveThrottling = () => {
@@ -59,4 +59,9 @@ export const stopAdaptiveThrottling = () => {
     clearInterval(evaluationInterval);
     evaluationInterval = null;
   }
+};
+
+export const restartAdaptiveThrottling = () => {
+  stopAdaptiveThrottling();
+  startAdaptiveThrottling();
 };

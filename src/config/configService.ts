@@ -6,8 +6,9 @@ import {
   EndpointOverride,
 } from "../types";
 import { DEFAULT_TIER_CONFIGS, DEFAULT_ADAPTIVE_CONFIG } from "./defaults";
+import { logger } from "../core/logger";
 
-// In-memory config store — fast lookups, no DB calls on every request
+// In-memory config store - fast lookups, no DB calls on every request
 // Updated at runtime via Admin API or polling
 
 const tierMap = new Map<UserTier, TierConfig>();
@@ -43,7 +44,7 @@ export const updateTierConfig = (updated: Partial<TierConfig> & { tier: UserTier
   };
 
   tierMap.set(updated.tier, merged);
-  console.log(`Config updated for tier: ${updated.tier}`);
+  logger.info(`Config updated for tier: ${updated.tier}`);
   return merged;
 };
 
@@ -75,7 +76,7 @@ export const getAdaptiveConfig = (): AdaptiveConfig => {
 
 export const updateAdaptiveConfig = (updated: Partial<AdaptiveConfig>): AdaptiveConfig => {
   adaptiveConfig = { ...adaptiveConfig, ...updated };
-  console.log("Adaptive config updated");
+  logger.info("Adaptive config updated");
   return adaptiveConfig;
 };
 

@@ -1,6 +1,6 @@
 import { TierConfig, AdaptiveConfig } from "../types";
 
-// Default rate limits per tier — used on first startup
+// Default rate limits per tier - used on first startup
 // Admin API can override these at runtime without restart
 
 export const DEFAULT_TIER_CONFIGS: TierConfig[] = [

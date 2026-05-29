@@ -1,15 +1,24 @@
 {
   "name": "rate-limiter",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Adaptive Redis-backed token bucket rate limiter with tiered limits and an admin dashboard.",
+  "main": "dist/server.js",
   "scripts": {
+    "build": "tsc",
     "dev": "ts-node-dev --respawn src/server.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test dist/tests/core.test.js",
+    "typecheck": "tsc --noEmit"
   },
-  "keywords": [],
+  "keywords": [
+    "rate-limiter",
+    "redis",
+    "token-bucket",
+    "express",
+    "typescript"
+  ],
   "author": "",
-  "license": "ISC",
-  "description": "",
+  "license": "Apache-2.0",
   "dependencies": {
     "dotenv": "^17.3.1",
     "express": "^5.2.1",

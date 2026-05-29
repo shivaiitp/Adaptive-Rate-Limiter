@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
+import { logger } from "../core/logger";
 import { checkRateLimit } from "../modules/rateLimiter/rateLimiter";
-import { getUserTier } from "../config/userService";
+import { resolveRequestUser } from "./identity";
 import { recordRequest } from "../modules/monitoring/metricsCollector";
 
 export const rateLimiter = async (
@@ -11,11 +12,15 @@ export const rateLimiter = async (
   const start = Date.now();
 
   try {
-    const userId = (req.headers["x-user-id"] as string) || "anonymous";
-    const endpoint = req.path;
-    const tier = getUserTier(userId);
+    const user = resolveRequestUser(req);
+    if (!user) {
+      recordRequest(false, Date.now() - start);
+      return res.status(401).json({ message: "Invalid or missing API key" });
+    }
 
-    const result = await checkRateLimit(userId, tier, endpoint);
+    const endpoint = req.path;
+
+    const result = await checkRateLimit(user.userId, user.tier, endpoint);
     const latency = Date.now() - start;
     recordRequest(!result.allowed, latency);
 
@@ -37,9 +42,9 @@ export const rateLimiter = async (
     next();
   } catch (err) {
     const latency = Date.now() - start;
-    recordRequest(false, latency, true);  // true = server error (Redis down, etc.)
-    console.error("Rate limiter error:", err);
-    // fail-open: allow request if rate limiter fails
+    recordRequest(false, latency, true); // true = server error (Redis down, etc.)
+    logger.error("Rate limiter error:", err);
+    // Fail-open: allow request if rate limiter fails.
     next();
   }
 };

@@ -38,7 +38,7 @@ export interface RateLimitHeaders {
   "Retry-After"?: number;
 }
 
-// Snapshot of system health — used by adaptive throttler
+// Snapshot of system health - used by adaptive throttler
 export interface SystemMetrics {
   cpuUsage: number;           // 0-100
   memoryUsage: number;        // 0-100
@@ -75,6 +75,7 @@ export interface UpdateTierConfigRequest {
   tier: UserTier;
   default?: RateLimitRule;
   endpoints?: EndpointOverride[];
+  adaptiveMinFactor?: number;
 }
 
 export interface UpdateAdaptiveConfigRequest {
@@ -95,4 +96,9 @@ export interface HealthStatus {
   uptime: number;
   adaptiveFactor: number;
   timestamp: number;
+}
+
+export interface AuthenticatedUser {
+  userId: string;
+  tier: UserTier;
 }

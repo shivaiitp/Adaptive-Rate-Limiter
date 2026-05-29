@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "crypto";
 import { NextFunction, Request, Response, Router } from "express";
 import {
   getAllTierConfigs,
@@ -24,10 +25,17 @@ const adminAuth = (req: Request, res: Response, next: NextFunction) => {
   const adminApiKey = process.env.ADMIN_API_KEY;
   if (!adminApiKey) return next();
 
-  if (req.header("x-admin-api-key") !== adminApiKey) {
+  const provided = req.header("x-admin-api-key") ?? "";
+  const expectedBuf = Buffer.from(adminApiKey);
+  const providedBuf = Buffer.from(provided);
+
+  // Length mismatch fails immediately; equal-length goes through constant-time compare
+  const ok = expectedBuf.length === providedBuf.length &&
+    timingSafeEqual(expectedBuf, providedBuf);
+
+  if (!ok) {
     return res.status(401).json({ error: "Invalid admin API key" });
   }
-
   return next();
 };
 

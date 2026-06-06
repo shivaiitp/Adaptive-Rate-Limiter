@@ -344,12 +344,13 @@ The Lua script returned `refill_rate` back to Node.js so it could calculate `Ret
 
 ## Performance
 
-Tested with k6 against a single-node setup (Docker, local Redis):
+Tested with k6 against a single-node setup (Docker Desktop on Windows, local Redis, k6 running in Docker on the compose network):
 
 | Scenario | Throughput | p50 | p95 | p99 |
 |---|---|---|---|---|
-| Steady (100 VUs) | TODO req/s | TODO | TODO | TODO |
-| Burst (1k VUs) | TODO req/s | TODO | TODO | TODO |
+| Steady (100 VUs) | 1,250 req/s | 75.52ms | 98.94ms | 112.66ms |
+| Tier mix (30 free + 200 pro req/s) | 230 req/s | 2.13ms | 3.23ms | 5.8ms |
+| Burst ramp (1k VUs) | 1,304 req/s | 257.12ms | 470.74ms | 529.27ms |
 
 Free-tier users correctly throttle at 1 req/s; pro tier sustains 10 req/s; enterprise sustains 100 req/s.
 

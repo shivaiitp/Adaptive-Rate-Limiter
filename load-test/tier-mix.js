@@ -1,6 +1,10 @@
 import http from 'k6/http';
 import { check } from 'k6';
 
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 429));
+
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
+
 export const options = {
   scenarios: {
     free_tier: {
@@ -23,7 +27,7 @@ export const options = {
 };
 
 export function freeUser() {
-  const res = http.get('http://localhost:3000/test', {
+  const res = http.get(`${BASE_URL}/test`, {
     headers: { 'x-api-key': 'demo-free-key' },
     tags: { tier: 'free' },
   });
@@ -31,7 +35,7 @@ export function freeUser() {
 }
 
 export function proUser() {
-  const res = http.get('http://localhost:3000/test', {
+  const res = http.get(`${BASE_URL}/test`, {
     headers: { 'x-api-key': 'demo-pro-key' },
     tags: { tier: 'pro' },
   });

@@ -159,33 +159,47 @@ rate-limiter/
 │   ├── config/
 │   │   ├── defaults.ts                      # Default tier configs & adaptive thresholds
 │   │   ├── configService.ts                 # In-memory config store — tier rules, adaptive config
-│   │   └── userService.ts                   # User → tier mapping (demo: in-memory)
+│   │   ├── userService.ts                   # User → tier mapping (demo: in-memory)
+│   │   └── validation.ts                    # Input validation — rule parsing, userId sanitization
 │   │
 │   ├── core/
+│   │   ├── logger.ts                        # Structured logger (console-based)
 │   │   └── redis/
 │   │       ├── client.ts                    # ioredis client with retry strategy
 │   │       └── scripts.ts                   # Token Bucket Lua script — loaded once, called via EVALSHA
 │   │
 │   ├── middleware/
+│   │   ├── identity.ts                      # User resolution — API key lookup, x-user-id fallback
 │   │   └── rateLimiterMiddleware.ts         # Express middleware — extracts user, checks limit, sets headers
 │   │
-│   └── modules/
-│       ├── rateLimiter/
-│       │   └── rateLimiter.ts               # Core logic — config lookup, adaptive scaling, Redis call
-│       ├── monitoring/
-│       │   └── metricsCollector.ts          # Rolling window metrics — CPU, memory, latency, RPS
-│       ├── adaptive/
-│       │   └── adaptiveThrottler.ts         # Background evaluator — adjusts factor based on health
-│       └── admin/
-│           ├── adminRoutes.ts               # REST API — CRUD for tiers, users, adaptive config, metrics
-│           └── healthRoute.ts               # GET /health — Redis ping, uptime, adaptive factor
+│   ├── modules/
+│   │   ├── rateLimiter/
+│   │   │   └── rateLimiter.ts               # Core logic — config lookup, adaptive scaling, Redis call
+│   │   ├── monitoring/
+│   │   │   └── metricsCollector.ts          # Rolling window metrics — CPU, memory, latency, RPS
+│   │   ├── adaptive/
+│   │   │   └── adaptiveThrottler.ts         # Background evaluator — adjusts factor based on health
+│   │   └── admin/
+│   │       ├── adminRoutes.ts               # REST API — CRUD for tiers, users, adaptive config, metrics
+│   │       └── healthRoute.ts               # GET /health — Redis ping, uptime, adaptive factor
+│   │
+│   └── tests/
+│       └── core.test.ts                     # Unit tests — config, validation, endpoint matching
 │
 ├── public/
 │   └── index.html                           # Admin dashboard — live metrics, tier editor, burst tester
 │
+├── load-test/
+│   ├── steady.js                            # k6 — constant 100 VUs for 30s
+│   ├── stress-ramp.js                       # k6 — ramp from 100 to 1000 VUs
+│   └── tier-mix.js                          # k6 — concurrent free + pro tier traffic
+│
+├── .github/workflows/ci.yml                 # GitHub Actions — typecheck + test with Redis service
+├── Dockerfile                               # Multi-stage build (build → production)
+├── docker-compose.yml                       # App + Redis with healthcheck
+├── .env.example                             # Environment variable template
 ├── package.json
-├── tsconfig.json
-└── .env                                     # REDIS_HOST, REDIS_PORT, PORT
+└── tsconfig.json
 ```
 
 ---
@@ -310,7 +324,7 @@ A real-time monitoring dashboard accessible at `/admin`:
 |---|-----------|---------|----------|
 | 1 | **Redis Failure** | Rate limiter can't read/write token data — may block all requests | Fail-open strategy: allow requests temporarily, log errors for recovery |
 | 2 | **Race Conditions** | Concurrent requests read same token count — limit exceeded incorrectly | Redis Lua scripts execute atomically — correct updates guaranteed |
-| 3 | **Hot Keys (High Traffic Users)** | Single user/API key gets huge traffic — Redis bottleneck on one key | Key sharding (hash suffix) distributes load across multiple keys |
+| 3 | **Hot Keys (High Traffic Users)** | Single user/API key gets huge traffic — Redis bottleneck on one key | Could be addressed via key sharding (hash-suffix partitioning) to distribute load across multiple Redis keys |
 | 4 | **Burst Traffic Spikes** | Sudden spike of requests can overload the system | Token bucket allows limited bursts + adaptive throttling reduces limits during high load |
 | 5 | **Config Service Failure** | Cannot fetch latest rate limits — system may malfunction | Cached configs + default fallback values ensure continued operation |
 | 6 | **Clock Synchronization** | Different server times cause incorrect token refill calculations | Use consistent time source (Redis server time / `Date.now()` per instance) |
@@ -373,7 +387,7 @@ Free-tier users correctly throttle at 1 req/s; pro tier sustains 10 req/s; enter
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/rate-limiter.git
+git clone https://github.com/shivaiitp/Adaptive-Rate-Limiter.git
 cd rate-limiter
 ```
 

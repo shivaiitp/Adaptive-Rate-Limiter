@@ -44,7 +44,7 @@ if allowed == 0 and refill_rate > 0 then
   retry_after_ms = math.ceil(((1 - tokens) / refill_rate) * 1000)
 end
 
-return {allowed, tokens, refill_rate, retry_after_ms}
+return {allowed, tokens, retry_after_ms}
 `;
 
 let tokenBucketScriptSha: string | undefined;
@@ -79,7 +79,7 @@ export const runTokenBucketScript = async (
   capacity: number,
   refillRate: number,
   now: number
-): Promise<[number, number, number, number]> => {
+): Promise<[number, number, number]> => {
   let scriptSha = await getTokenBucketScriptSha();
 
   let rawResult: unknown;
@@ -95,10 +95,10 @@ export const runTokenBucketScript = async (
     rawResult = await redis.evalsha(scriptSha, 1, key, capacity.toString(), refillRate.toString(), now.toString());
   }
 
-  if (!Array.isArray(rawResult) || rawResult.length < 4) {
+  if (!Array.isArray(rawResult) || rawResult.length < 3) {
     throw new Error("Unexpected Redis script return value");
   }
 
-  const [allowed, tokens, refillRateResult, retryAfterMs] = rawResult.map((value) => Number(value)) as [number, number, number, number];
-  return [allowed, tokens, refillRateResult, retryAfterMs];
+  const [allowed, tokens, retryAfterMs] = rawResult.map((value) => Number(value)) as [number, number, number];
+  return [allowed, tokens, retryAfterMs];
 };

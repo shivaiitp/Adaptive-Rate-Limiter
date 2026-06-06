@@ -39,7 +39,7 @@ export const checkRateLimit = async (
   const result = await runTokenBucketScript(key, scaledRule.capacity, scaledRule.refillRate, now);
   const allowed = result[0] === 1;
   const tokens = result[1];
-  const retryAfterMs = result[3] ?? 0;
+  const retryAfterMs = result[2] ?? 0;
 
   return {
     allowed,

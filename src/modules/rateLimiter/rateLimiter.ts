@@ -1,14 +1,25 @@
 import { RateLimitResult, RateLimitRule, UserTier } from "../../types";
 import { getRuleForRequest, getAdaptiveMinFactor, getMatchedEndpointKey } from "../../config/configService";
 import { runTokenBucketScript } from "../../core/redis/scripts";
+import { logger } from "../../core/logger";
 
-// Current adaptive factor - updated by the adaptive throttler (Step 5)
-// 1.0 = normal, 0.5 = half limits, etc.
+// Current adaptive factor — updated by the adaptive throttler.
+// 1.0 = full limits, 0.5 = half limits, etc.
 let adaptiveFactor = 1.0;
 
 export const setAdaptiveFactor = (factor: number) => {
-  if (!Number.isFinite(factor)) return;
-  adaptiveFactor = Math.max(0, factor);
+  if (!Number.isFinite(factor)) {
+    logger.warn("setAdaptiveFactor called with non-finite value — ignoring", { factor });
+    return;
+  }
+  const clamped = Math.max(0, factor);
+  if (clamped !== adaptiveFactor) {
+    logger.info("Adaptive factor changed", {
+      from: +adaptiveFactor.toFixed(3),
+      to: +clamped.toFixed(3),
+    });
+    adaptiveFactor = clamped;
+  }
 };
 
 export const getAdaptiveFactor = (): number => adaptiveFactor;
@@ -18,10 +29,25 @@ const applyAdaptiveScaling = (rule: RateLimitRule, tier: UserTier): RateLimitRul
   const minFactor = getAdaptiveMinFactor(tier);
   const effectiveFactor = Math.max(minFactor, adaptiveFactor);
 
-  return {
+  const scaled = {
     capacity: Math.max(1, Math.floor(rule.capacity * effectiveFactor)),
     refillRate: Math.max(0.001, rule.refillRate * effectiveFactor),
   };
+
+  if (effectiveFactor < 1) {
+    logger.debug("Adaptive scaling applied", {
+      tier,
+      rawCapacity: rule.capacity,
+      scaledCapacity: scaled.capacity,
+      rawRefillRate: rule.refillRate,
+      scaledRefillRate: +scaled.refillRate.toFixed(4),
+      adaptiveFactor: +adaptiveFactor.toFixed(3),
+      effectiveFactor: +effectiveFactor.toFixed(3),
+      minFactor,
+    });
+  }
+
+  return scaled;
 };
 
 export const checkRateLimit = async (

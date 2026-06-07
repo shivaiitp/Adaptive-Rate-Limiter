@@ -10,17 +10,25 @@ export const rateLimiter = async (
   next: NextFunction
 ) => {
   const start = Date.now();
+  const method = req.method;
+  const path = req.path;
 
   try {
     const user = resolveRequestUser(req);
+
     if (!user) {
-      recordRequest(false, Date.now() - start);
+      const latency = Date.now() - start;
+      recordRequest(false, latency);
+      logger.warn("Request rejected — invalid or missing API key", {
+        method,
+        path,
+        ip: req.ip,
+        latencyMs: latency,
+      });
       return res.status(401).json({ message: "Invalid or missing API key" });
     }
 
-    const endpoint = req.path;
-
-    const result = await checkRateLimit(user.userId, user.tier, endpoint);
+    const result = await checkRateLimit(user.userId, user.tier, path);
     const latency = Date.now() - start;
     recordRequest(!result.allowed, latency);
 
@@ -35,17 +43,40 @@ export const rateLimiter = async (
 
     if (!result.allowed) {
       res.setHeader("Retry-After", result.retryAfter);
+      logger.debug("Request rate-limited", {
+        userId: user.userId,
+        tier: user.tier,
+        method,
+        path,
+        retryAfter: result.retryAfter,
+        limit: result.limit,
+        latencyMs: latency,
+      });
       return res.status(429).json({
         message: "Too Many Requests",
         retryAfter: result.retryAfter,
       });
     }
 
+    logger.debug("Request allowed", {
+      userId: user.userId,
+      tier: user.tier,
+      method,
+      path,
+      tokensRemaining: Math.floor(result.tokens),
+      latencyMs: latency,
+    });
+
     next();
   } catch (err) {
     const latency = Date.now() - start;
     recordRequest(false, latency, false, true); // infra error: don't poison errorRate
-    logger.error("Rate limiter error:", err);
+    logger.error("Rate limiter middleware threw unexpectedly — failing open", err, {
+      method,
+      path,
+      ip: req.ip,
+      latencyMs: latency,
+    });
     // Fail-open: allow request if rate limiter fails.
     next();
   }

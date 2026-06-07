@@ -46,7 +46,7 @@
     <div class="flex items-center justify-between mb-8">
       <div>
         <h1 class="text-3xl font-bold text-white">Rate Limiter Dashboard</h1>
-        <p class="text-gray-500 mt-1">Real-time monitoring & configuration</p>
+        <p class="text-gray-500 mt-1">Real-time monitoring &amp; configuration</p>
       </div>
       <div class="flex items-center gap-2 text-sm text-gray-400">
         <span class="pulse-dot w-2 h-2 bg-green-500 rounded-full inline-block"></span>
@@ -98,10 +98,16 @@
         <h2 class="text-lg font-semibold text-white mb-4">Quick Test</h2>
         <p class="text-gray-500 text-sm mb-4">Send requests to test rate limiting</p>
         <div class="flex gap-2 mb-4">
-          <input type="text" id="test-user" placeholder="User ID (e.g. demo-free)" value="demo-free"
-            class="flex-1 rounded-lg px-3 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 focus:border-accent focus:outline-none" />
-          <input type="text" id="test-api-key" placeholder="API key"
-            class="flex-1 rounded-lg px-3 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 focus:border-accent focus:outline-none" />
+          <select id="test-user" class="flex-1 rounded-lg px-3 py-2 text-sm">
+            <option value="demo-free">👤 demo-free</option>
+            <option value="demo-pro">👤 demo-pro</option>
+            <option value="demo-enterprise">👤 demo-enterprise</option>
+          </select>
+          <select id="test-api-key" class="flex-1 rounded-lg px-3 py-2 text-sm">
+            <option value="demo-free-key">🔑 demo-free-key</option>
+            <option value="demo-pro-key">🔑 demo-pro-key</option>
+            <option value="demo-enterprise-key">🔑 demo-enterprise-key</option>
+          </select>
           <select id="test-endpoint" class="rounded-lg px-3 py-2 text-sm">
             <option value="/test">/test</option>
             <option value="/api/data">/api/data</option>
@@ -115,6 +121,11 @@
           <span class="border-l border-dark-600 mx-1"></span>
           <input type="number" id="test-count" value="50" min="1" max="1000"
             class="w-20 rounded-lg px-3 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 focus:border-accent focus:outline-none" />
+          <label class="text-xs text-gray-500 flex items-center gap-1">
+            <span>concurrency</span>
+            <input type="number" id="test-concurrency" value="20" min="1" max="200"
+              class="w-16 rounded-lg px-2 py-2 text-sm bg-dark-700 border border-dark-600 text-gray-200 focus:border-accent focus:outline-none" />
+          </label>
           <button onclick="sendTest(+document.getElementById('test-count').value)" class="bg-accent hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition">Send</button>
           <button onclick="document.getElementById('test-results').innerHTML=''" class="bg-dark-600 hover:bg-dark-500 text-gray-300 px-4 py-2 rounded-lg text-sm font-medium transition">Clear</button>
         </div>
@@ -174,7 +185,7 @@ async function adminFetch(path, options = {}) {
   return adminFetch(path, options);
 }
 
-// Metrics polling
+// ── Metrics polling ───────────────────────────────────────────────────────────
 
 async function fetchMetrics() {
   try {
@@ -203,7 +214,7 @@ async function fetchMetrics() {
   }
 }
 
-// Tier configs
+// ── Tier configs ──────────────────────────────────────────────────────────────
 
 async function fetchTierConfigs() {
   const res = await adminFetch('/config/tiers');
@@ -244,7 +255,56 @@ async function saveTierConfig(tier) {
   fetchTierConfigs();
 }
 
-// Users
+const DEMO_USER_IDS = ['demo-free', 'demo-pro', 'demo-enterprise'];
+
+// ── Dropdown sync ─────────────────────────────────────────────────────────────
+// Keeps the Quick Test user/key dropdowns in sync with the user list.
+// Demo users are always present; custom users are saved to localStorage.
+
+const STORAGE_KEY = 'rateLimiterCustomUsers';
+
+function loadCustomUsers() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveCustomUsers(users) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
+}
+
+function addToDropdowns(userId, apiKey, selectFirst = false) {
+  const userSel = document.getElementById('test-user');
+  const keySel  = document.getElementById('test-api-key');
+
+  // Avoid duplicates
+  if ([...userSel.options].some(o => o.value === userId)) {
+    if (selectFirst) {
+      userSel.value = userId;
+      keySel.value  = apiKey;
+    }
+    return;
+  }
+
+  const uOpt = document.createElement('option');
+  uOpt.value = userId;
+  uOpt.textContent = `👤 ${userId}`;
+  userSel.appendChild(uOpt);
+
+  const kOpt = document.createElement('option');
+  kOpt.value = apiKey;
+  kOpt.textContent = `🔑 ${apiKey}`;
+  keySel.appendChild(kOpt);
+
+  if (selectFirst) {
+    userSel.value = userId;
+    keySel.value  = apiKey;
+  }
+}
+
+// Restore custom users from localStorage on page load
+loadCustomUsers().forEach(u => addToDropdowns(u.userId, u.apiKey));
+
+// ── Users ─────────────────────────────────────────────────────────────────────
 
 async function fetchUsers() {
   const res = await adminFetch('/users');
@@ -253,12 +313,22 @@ async function fetchUsers() {
   container.replaceChildren();
 
   users.forEach(u => {
+    // Sync to Quick Test dropdowns (non-demo users)
+    if (u.apiKey && !DEMO_USER_IDS.includes(u.userId)) {
+      addToDropdowns(u.userId, u.apiKey);
+    }
+
     const div = document.createElement('div');
     div.className = 'flex items-center gap-3 bg-dark-700 rounded-lg px-4 py-2';
 
     const name = document.createElement('span');
     name.className = 'text-sm text-gray-300 flex-1 font-mono';
     name.textContent = u.userId;
+
+    const keyBadge = document.createElement('span');
+    keyBadge.className = 'text-xs text-gray-500 font-mono truncate max-w-[120px]';
+    keyBadge.title = u.apiKey || '—';
+    keyBadge.textContent = u.apiKey || '—';
 
     const select = document.createElement('select');
     select.className = 'rounded-lg px-2 py-1 text-sm';
@@ -280,7 +350,7 @@ async function fetchUsers() {
     remove.textContent = 'X';
     remove.addEventListener('click', () => deleteUser(u.userId));
 
-    div.append(name, select, save, remove);
+    div.append(name, keyBadge, select, save, remove);
     container.appendChild(div);
   });
 }
@@ -296,28 +366,52 @@ async function updateUser(userId, tier) {
 
 async function deleteUser(userId) {
   await adminFetch(`/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+
+  // Remove from Quick Test dropdowns and localStorage
+  const custom = loadCustomUsers().filter(u => u.userId !== userId);
+  saveCustomUsers(custom);
+  ['test-user', 'test-api-key'].forEach(id => {
+    const sel = document.getElementById(id);
+    [...sel.options].forEach(o => {
+      if (id === 'test-user' && o.value === userId) o.remove();
+      if (id === 'test-api-key' && custom.every(u => u.apiKey !== o.value) && !['demo-free-key','demo-pro-key','demo-enterprise-key'].includes(o.value)) o.remove();
+    });
+  });
+
   fetchUsers();
 }
 
 async function addUser() {
   const userId = document.getElementById('new-user-id').value.trim();
-  const tier = document.getElementById('new-user-tier').value;
+  const tier   = document.getElementById('new-user-tier').value;
   if (!userId) return;
   if (!USER_ID_PATTERN.test(userId)) {
     window.alert('User ID must be 1-80 chars: letters, numbers, dot, underscore, colon, or hyphen.');
     return;
   }
 
-  await adminFetch(`/users/${encodeURIComponent(userId)}`, {
+  const res = await adminFetch(`/users/${encodeURIComponent(userId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tier }),
   });
+
+  const data = await res.json();
+  const apiKey = data.apiKey || `${userId}-${tier}-key`;
+
+  // Add to Quick Test dropdowns and select immediately
+  addToDropdowns(userId, apiKey, true);
+
+  // Persist to localStorage for future sessions
+  const custom = loadCustomUsers().filter(u => u.userId !== userId);
+  custom.push({ userId, tier, apiKey });
+  saveCustomUsers(custom);
+
   document.getElementById('new-user-id').value = '';
   fetchUsers();
 }
 
-// Adaptive config
+// ── Adaptive config ───────────────────────────────────────────────────────────
 
 const adaptiveFields = [
   { key: 'enabled', label: 'Enabled', type: 'checkbox' },
@@ -368,43 +462,81 @@ async function saveAdaptiveConfig() {
   fetchAdaptiveConfig();
 }
 
-// Quick test
+// ── Quick Test — streams results live, max CONCURRENCY in-flight at once ──────
 
 async function sendTest(count) {
-  const userId = document.getElementById('test-user').value;
-  const apiKey = document.getElementById('test-api-key').value.trim();
+  const userId   = document.getElementById('test-user').value;
+  const apiKey   = document.getElementById('test-api-key').value.trim();
   const endpoint = document.getElementById('test-endpoint').value;
-  const results = document.getElementById('test-results');
-  const method = endpoint === '/api/login' ? 'POST' : 'GET';
-  const headers = apiKey ? { 'x-api-key': apiKey } : { 'x-user-id': userId };
+  const results  = document.getElementById('test-results');
+  const method   = endpoint === '/api/login' ? 'POST' : 'GET';
+  const headers  = apiKey ? { 'x-api-key': apiKey } : { 'x-user-id': userId };
 
-  const promises = Array.from({ length: count }, () =>
-    fetch(endpoint, { method, headers })
-      .then(res => ({ status: res.status, remaining: res.headers.get('X-RateLimit-Remaining'), limit: res.headers.get('X-RateLimit-Limit') }))
-      .catch(err => ({ status: 0, remaining: '-', limit: '-', error: err.message }))
-  );
+  // Read concurrency from the UI input (clamped to a sane range)
+  const CONCURRENCY = Math.min(200, Math.max(1, +document.getElementById('test-concurrency').value || 20));
 
-  const responses = await Promise.all(promises);
+  // Live counters
+  let ok = 0, blocked = 0, done = 0;
 
-  let ok = 0, blocked = 0;
-  for (const r of responses) {
+  // Summary line created upfront and updated after every response
+  const summary = document.createElement('div');
+  summary.className = 'text-accent font-bold border-b border-dark-600 pb-1 mb-1';
+  summary.textContent = `Burst ${count}: sending… (0/${count})`;
+  results.prepend(summary);
+
+  const updateSummary = () => {
+    summary.textContent = done < count
+      ? `Burst ${count}: ${ok} OK · ${blocked} limited · ${done}/${count} done`
+      : `Burst ${count}: ${ok} OK · ${blocked} rate-limited ✓`;
+  };
+
+  // Render one result line immediately as each response arrives
+  const renderResult = (r) => {
+    done++;
     if (r.status === 200) ok++; else blocked++;
-    const color = r.status === 200 ? 'text-green-400' : 'text-red-400';
+
+    const color = r.status === 200
+      ? 'text-green-400'
+      : r.status === 429 ? 'text-yellow-400' : 'text-red-400';
+
+    const label = r.status === 200 ? 'OK'
+      : r.status === 429 ? 'RATE LIMITED' : 'ERROR';
+
     const line = document.createElement('div');
     line.className = color;
     line.textContent = r.error
       ? `ERR: ${r.error}`
-      : `${r.status} ${r.status === 200 ? 'OK' : 'BLOCKED'} | Remaining: ${r.remaining}/${r.limit}`;
-    results.prepend(line);
-  }
+      : `${r.status} ${label} | Remaining: ${r.remaining}/${r.limit}`;
 
-  const summary = document.createElement('div');
-  summary.className = 'text-accent font-bold border-b border-dark-600 pb-1 mb-1';
-  summary.textContent = `Burst ${count}: ${ok} OK, ${blocked} blocked`;
-  results.prepend(summary);
+    // Insert just below the summary so newest appear at top
+    summary.insertAdjacentElement('afterend', line);
+    updateSummary();
+  };
+
+  // Shared queue — CONCURRENCY workers pull from it until empty
+  const queue = Array.from({ length: count });
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      queue.pop();
+      const r = await fetch(endpoint, { method, headers })
+        .then(res => ({
+          status: res.status,
+          remaining: res.headers.get('X-RateLimit-Remaining'),
+          limit: res.headers.get('X-RateLimit-Limit'),
+        }))
+        .catch(err => ({ status: 0, remaining: '-', limit: '-', error: err.message }));
+      renderResult(r);
+    }
+  };
+
+  // Launch workers — each loops until the queue is drained
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, count) }, worker)
+  );
 }
 
-// Init
+// ── Init ──────────────────────────────────────────────────────────────────────
 
 fetchMetrics();
 fetchTierConfigs();

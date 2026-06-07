@@ -23,7 +23,7 @@ let currentMetrics: SystemMetrics = {
   timestamp: Date.now(),
 };
 
-// Called by the middleware on every request
+// Called by the middleware on every request.
 // blocked = rate-limited (429), serverError = actual user-visible failure (5xx)
 // infraError = rate limiter infrastructure failure (Redis down, fail-open)
 export const recordRequest = (
@@ -86,6 +86,25 @@ export const collectMetrics = (): SystemMetrics => {
     timestamp: now,
   };
 
+  logger.debug("Metrics snapshot collected", {
+    rps: currentMetrics.requestsPerSecond,
+    blocked: currentMetrics.blockedRequests,
+    avgLatencyMs: currentMetrics.avgLatency,
+    errorRate: +(currentMetrics.errorRate * 100).toFixed(2) + "%",
+    cpu: currentMetrics.cpuUsage + "%",
+    mem: currentMetrics.memoryUsage + "%",
+    infraErrors: currentMetrics.infraErrors,
+    windowMs: Math.round(windowDuration * 1000),
+  });
+
+  // Log a warning if infra errors occurred in this window
+  if (currentMetrics.infraErrors > 0) {
+    logger.warn("Infra errors detected in metrics window", {
+      infraErrors: currentMetrics.infraErrors,
+      windowMs: Math.round(windowDuration * 1000),
+    });
+  }
+
   // Reset window
   totalRequests = 0;
   blockedRequests = 0;
@@ -97,7 +116,7 @@ export const collectMetrics = (): SystemMetrics => {
   return currentMetrics;
 };
 
-// Live view - uses cached CPU/memory from the last collection,
+// Live view — uses cached CPU/memory from the last collection,
 // merged with current-window request stats so the dashboard sees
 // up-to-the-second numbers without racing the CPU sampler.
 export const getMetrics = (): SystemMetrics => {
@@ -123,12 +142,13 @@ let collectionInterval: ReturnType<typeof setInterval> | null = null;
 export const startMetricsCollection = (intervalMs: number = 5000) => {
   if (collectionInterval) return;
   collectionInterval = setInterval(collectMetrics, intervalMs);
-  logger.info(`Metrics collection started (every ${intervalMs}ms)`);
+  logger.info("Metrics collection started", { intervalMs });
 };
 
 export const stopMetricsCollection = () => {
   if (collectionInterval) {
     clearInterval(collectionInterval);
     collectionInterval = null;
+    logger.info("Metrics collection stopped");
   }
 };

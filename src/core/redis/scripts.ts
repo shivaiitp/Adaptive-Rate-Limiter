@@ -48,27 +48,40 @@ return {allowed, tokens, retry_after_ms}
 `;
 
 let tokenBucketScriptSha: string | undefined;
+
+// Single inflight load promise — prevents the NOSCRIPT storm where dozens of
+// concurrent requests all try to reload the script at the same time.
 let loadPromise: Promise<void> | undefined;
 
-const isNoScriptError = (err: unknown): boolean => {
-  return err instanceof Error && err.message.includes("NOSCRIPT");
-};
+const isNoScriptError = (err: unknown): boolean =>
+  err instanceof Error && err.message.includes("NOSCRIPT");
 
-export const loadScripts = async () => {
-  tokenBucketScriptSha = await redis.script("LOAD", TOKEN_BUCKET_SCRIPT) as string;
-  logger.info("Lua script loaded:", tokenBucketScriptSha);
+export const loadScripts = async (): Promise<void> => {
+  // If a load is already in flight, reuse it instead of spawning another.
+  if (loadPromise) {
+    await loadPromise;
+    return;
+  }
+
+  loadPromise = (async () => {
+    logger.debug("Loading Lua token-bucket script into Redis...");
+    tokenBucketScriptSha = (await redis.script("LOAD", TOKEN_BUCKET_SCRIPT)) as string;
+    logger.info("Lua script loaded", { sha: tokenBucketScriptSha });
+  })().finally(() => {
+    loadPromise = undefined;
+  });
+
+  await loadPromise;
 };
 
 const getTokenBucketScriptSha = async (): Promise<string> => {
   if (tokenBucketScriptSha) return tokenBucketScriptSha;
 
-  if (!loadPromise) {
-    loadPromise = loadScripts().finally(() => { loadPromise = undefined; });
-  }
-  await loadPromise;
+  logger.debug("Script SHA not cached — loading now");
+  await loadScripts();
 
   if (!tokenBucketScriptSha) {
-    throw new Error("Redis Lua script SHA is unavailable");
+    throw new Error("Redis Lua script SHA is unavailable after load attempt");
   }
 
   return tokenBucketScriptSha;
@@ -84,21 +97,39 @@ export const runTokenBucketScript = async (
 
   let rawResult: unknown;
   try {
-    rawResult = await redis.evalsha(scriptSha, 1, key, capacity.toString(), refillRate.toString(), now.toString());
+    rawResult = await redis.evalsha(
+      scriptSha, 1, key,
+      capacity.toString(), refillRate.toString(), now.toString()
+    );
   } catch (err) {
-    if (!isNoScriptError(err)) {
-      throw err;
-    }
-    logger.warn("Redis Lua script cache missed; reloading script");
+    if (!isNoScriptError(err)) throw err;
+
+    // Redis flushed its script cache (e.g. after a restart). Reload once.
+    logger.warn("Redis Lua script evicted from cache — reloading", { key, sha: scriptSha });
+    tokenBucketScriptSha = undefined; // force reload
     await loadScripts();
     scriptSha = await getTokenBucketScriptSha();
-    rawResult = await redis.evalsha(scriptSha, 1, key, capacity.toString(), refillRate.toString(), now.toString());
+
+    logger.debug("Retrying evalsha after reload", { sha: scriptSha });
+    rawResult = await redis.evalsha(
+      scriptSha, 1, key,
+      capacity.toString(), refillRate.toString(), now.toString()
+    );
   }
 
   if (!Array.isArray(rawResult) || rawResult.length < 3) {
+    logger.error("Unexpected Redis script return value", { rawResult, key });
     throw new Error("Unexpected Redis script return value");
   }
 
-  const [allowed, tokens, retryAfterMs] = rawResult.map((value) => Number(value)) as [number, number, number];
+  const [allowed, tokens, retryAfterMs] = rawResult.map(Number) as [number, number, number];
+
+  logger.debug("Token bucket evaluated", {
+    key,
+    allowed: allowed === 1,
+    tokens: +tokens.toFixed(3),
+    retryAfterMs,
+  });
+
   return [allowed, tokens, retryAfterMs];
 };

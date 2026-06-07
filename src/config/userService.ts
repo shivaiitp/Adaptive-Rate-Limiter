@@ -45,6 +45,17 @@ export const removeUser = (userId: string): boolean => {
   return userTierMap.delete(userId);
 };
 
-export const getAllUsers = (): { userId: string; tier: UserTier }[] => {
-  return Array.from(userTierMap.entries()).map(([userId, tier]) => ({ userId, tier }));
+export const getApiKeyForUser = (userId: string): string | undefined => {
+  for (const [apiKey, mappedUserId] of apiKeyUserMap.entries()) {
+    if (mappedUserId === userId) return apiKey;
+  }
+  return undefined;
+};
+
+export const getAllUsers = (): { userId: string; tier: UserTier; apiKey?: string }[] => {
+  return Array.from(userTierMap.entries()).map(([userId, tier]) => ({
+    userId,
+    tier,
+    apiKey: getApiKeyForUser(userId),
+  }));
 };

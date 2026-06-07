@@ -1,5 +1,5 @@
 import { RateLimitResult, RateLimitRule, UserTier } from "../../types";
-import { getRuleForRequest, getAdaptiveMinFactor, getMatchedEndpointKey } from "../../config/configService";
+import { getRuleAndKey, getAdaptiveMinFactor } from "../../config/configService";
 import { runTokenBucketScript } from "../../core/redis/scripts";
 import { logger } from "../../core/logger";
 
@@ -30,7 +30,7 @@ const applyAdaptiveScaling = (rule: RateLimitRule, tier: UserTier): RateLimitRul
   const effectiveFactor = Math.max(minFactor, adaptiveFactor);
 
   const scaled = {
-    capacity: Math.max(1, Math.floor(rule.capacity * effectiveFactor)),
+    capacity:   Math.max(1, Math.floor(rule.capacity * effectiveFactor)),
     refillRate: Math.max(0.001, rule.refillRate * effectiveFactor),
   };
 
@@ -55,22 +55,22 @@ export const checkRateLimit = async (
   tier: UserTier,
   endpoint: string
 ): Promise<RateLimitResult> => {
-  const baseRule = getRuleForRequest(tier, endpoint);
+  // Single config scan — rule + Redis key suffix in one pass
+  const { rule: baseRule, endpointKey } = getRuleAndKey(tier, endpoint);
   const scaledRule = applyAdaptiveScaling(baseRule, tier);
 
-  const matchedEndpoint = getMatchedEndpointKey(tier, endpoint);
-  const key = `rate_limit:${userId}:${matchedEndpoint}`;
+  const key = `rate_limit:${userId}:${endpointKey}`;
   const now = Date.now();
 
   const result = await runTokenBucketScript(key, scaledRule.capacity, scaledRule.refillRate, now);
-  const allowed = result[0] === 1;
-  const tokens = result[1];
+  const allowed     = result[0] === 1;
+  const tokens      = result[1];
   const retryAfterMs = result[2] ?? 0;
 
   return {
     allowed,
     tokens,
-    limit: scaledRule.capacity,
+    limit:      scaledRule.capacity,
     retryAfter: Math.max(0, Math.ceil(retryAfterMs / 1000)),
     refillRate: scaledRule.refillRate,
   };

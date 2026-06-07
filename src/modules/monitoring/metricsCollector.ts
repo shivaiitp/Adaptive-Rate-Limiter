@@ -39,35 +39,49 @@ export const recordRequest = (
   totalLatency += latencyMs;
 };
 
-// CPU usage - track previous reading to compute delta (real-time usage)
-let prevCpuIdle = 0;
-let prevCpuTotal = 0;
+// ── CPU Usage (process-level) ────────────────────────────────────────────────
+// Uses process.cpuUsage() which measures only THIS Node.js process, not the
+// whole machine. This is what matters for rate limiting — we want to throttle
+// when OUR server is under load, not because some other process is busy.
+//
+// process.cpuUsage() returns cumulative microseconds of user+system time.
+// We track deltas between readings to get real-time usage over the interval.
 
-const getCpuUsage = (): number => {
-  const cpus = os.cpus();
-  let idle = 0;
-  let total = 0;
+let prevCpuUsage = process.cpuUsage();
+let prevCpuTime  = Date.now();
 
-  for (const cpu of cpus) {
-    idle += cpu.times.idle;
-    total += cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.irq + cpu.times.idle;
-  }
+const getProcessCpuPercent = (): number => {
+  const now     = Date.now();
+  const current = process.cpuUsage(prevCpuUsage); // delta since prevCpuUsage
 
-  const deltaIdle = idle - prevCpuIdle;
-  const deltaTotal = total - prevCpuTotal;
+  const elapsedUs = (now - prevCpuTime) * 1000; // ms → µs
+  const usedUs    = current.user + current.system;
 
-  prevCpuIdle = idle;
-  prevCpuTotal = total;
+  prevCpuUsage = process.cpuUsage();
+  prevCpuTime  = now;
 
-  if (deltaTotal === 0) return 0;
-  return Math.round((1 - deltaIdle / deltaTotal) * 100);
+  if (elapsedUs <= 0) return 0;
+
+  // Multiply by 100 for %; clamp to 100 (can slightly exceed on multi-core
+  // because user+system time counts all threads).
+  return Math.min(100, Math.round((usedUs / elapsedUs) * 100));
 };
+
+// Seed the baseline so the first real reading is accurate (not 0%).
+// Called once at module load — the very first process.cpuUsage() call above
+// already captures the baseline, so no extra work needed here.
+
+// ── Memory Usage ─────────────────────────────────────────────────────────────
+// Shows process heap usage vs. total system memory — gives a realistic view
+// of how much memory this Node.js process is consuming.
 
 const getMemoryUsage = (): number => {
-  const total = os.totalmem();
-  const free = os.freemem();
-  return Math.round(((total - free) / total) * 100);
+  const heapUsed  = process.memoryUsage().heapUsed;
+  const totalMem  = os.totalmem();
+  return Math.min(100, Math.round((heapUsed / totalMem) * 100));
 };
+
+// ── Metrics Collection ────────────────────────────────────────────────────────
 
 // Take a snapshot of current metrics and reset the rolling window
 export const collectMetrics = (): SystemMetrics => {
@@ -75,7 +89,7 @@ export const collectMetrics = (): SystemMetrics => {
   const windowDuration = (now - windowStart) / 1000; // seconds
 
   currentMetrics = {
-    cpuUsage: getCpuUsage(),
+    cpuUsage: getProcessCpuPercent(),
     memoryUsage: getMemoryUsage(),
     avgLatency: totalRequests > 0 ? Math.round(totalLatency / totalRequests) : 0,
     errorRate: totalRequests > 0 ? serverErrors / totalRequests : 0,
@@ -142,7 +156,7 @@ let collectionInterval: ReturnType<typeof setInterval> | null = null;
 export const startMetricsCollection = (intervalMs: number = 5000) => {
   if (collectionInterval) return;
   collectionInterval = setInterval(collectMetrics, intervalMs);
-  logger.info("Metrics collection started", { intervalMs });
+  logger.info("Metrics collection started", { intervalMs, cpuMode: "process" });
 };
 
 export const stopMetricsCollection = () => {

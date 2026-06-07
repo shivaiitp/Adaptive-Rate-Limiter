@@ -97,6 +97,37 @@ export const getMatchedEndpointKey = (tier: UserTier, endpoint: string): string 
   return override ? override.endpoint : "default";
 };
 
+// Single scan — returns both the rule and the matched Redis key suffix.
+// Use this on the hot request path to avoid scanning config.endpoints twice.
+export const getRuleAndKey = (
+  tier: UserTier,
+  endpoint: string
+): { rule: RateLimitRule; endpointKey: string } => {
+  const config = tierMap.get(tier);
+
+  if (!config) {
+    logger.warn("No config found for tier — using hard fallback", { tier, endpoint });
+    return { rule: { capacity: 5, refillRate: 1 }, endpointKey: "default" };
+  }
+
+  const override = config.endpoints?.find((e: EndpointOverride) =>
+    endpoint === e.endpoint || endpoint.startsWith(e.endpoint + "/")
+  );
+
+  const rule       = override ? override.rule : config.default;
+  const endpointKey = override ? override.endpoint : "default";
+
+  logger.debug("Rule resolved for request", {
+    tier,
+    endpoint,
+    matchedOverride: endpointKey,
+    capacity: rule.capacity,
+    refillRate: rule.refillRate,
+  });
+
+  return { rule, endpointKey };
+};
+
 export const getAdaptiveMinFactor = (tier: UserTier): number => {
   return tierMap.get(tier)?.adaptiveMinFactor ?? 0.3;
 };

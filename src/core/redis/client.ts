@@ -2,55 +2,72 @@ import Redis from "ioredis";
 import { logger } from "../logger";
 
 // ── Connection resolution ────────────────────────────────────────────────────
-// Priority:
-//  1. REDIS_URL  — full connection string (Railway, Render, Heroku, etc.)
-//  2. REDIS_HOST + REDIS_PORT — individual vars (local dev, Docker Compose)
-//  3. 127.0.0.1:6379 — last-resort fallback
+// Checks every common env var pattern used by hosting providers:
+//
+//  REDIS_URL          — Railway (linked), Render, Heroku, Fly.io
+//  REDIS_PRIVATE_URL  — Railway internal network URL (faster, preferred)
+//  REDISHOST + REDISPORT + REDISPASSWORD  — Railway plugin auto-vars
+//  REDIS_HOST + REDIS_PORT  — Docker Compose / local dev
+//  fallback: 127.0.0.1:6379
 
-const redisUrl  = process.env.REDIS_URL;
-const redisHost = process.env.REDIS_HOST || "127.0.0.1";
+// Full-URL providers (checked in priority order)
+const redisUrl =
+  process.env.REDIS_PRIVATE_URL ||   // Railway internal (fastest)
+  process.env.REDIS_URL          ||   // Railway linked / Render / Heroku
+  process.env.REDISURL;              // Some providers omit the underscore
+
+// Individual-var providers (Railway plugin auto-injects these to the same service)
+const redisHost = process.env.REDISHOST || process.env.REDIS_HOST;
 const redisPort = (() => {
-  const p = Number(process.env.REDIS_PORT);
+  const raw = process.env.REDISPORT || process.env.REDIS_PORT;
+  const p = Number(raw);
   return Number.isInteger(p) && p > 0 ? p : 6379;
 })();
+const redisPassword = process.env.REDISPASSWORD || process.env.REDIS_PASSWORD;
 
-// Mask credentials in logs — show host:port only
+// Safe description for logs (never exposes passwords)
 const safeConnectionDesc = (() => {
-  if (redisUrl) {
-    try {
-      const u = new URL(redisUrl);
-      return `${u.hostname}:${u.port} (via REDIS_URL)`;
-    } catch {
-      return "REDIS_URL (unparseable)";
-    }
-  }
-  return `${redisHost}:${redisPort} (via REDIS_HOST/PORT)`;
+  if (process.env.REDIS_PRIVATE_URL) return `internal Railway URL (REDIS_PRIVATE_URL)`;
+  if (process.env.REDIS_URL)         return `${tryHost(process.env.REDIS_URL)} (REDIS_URL)`;
+  if (process.env.REDISURL)          return `${tryHost(process.env.REDISURL)} (REDISURL)`;
+  if (redisHost)                     return `${redisHost}:${redisPort} (REDISHOST/REDIS_HOST)`;
+  return `127.0.0.1:6379 (fallback — no Redis env vars found)`;
 })();
 
-logger.debug("Redis connection config resolved", { target: safeConnectionDesc });
+function tryHost(url: string): string {
+  try { const u = new URL(url); return `${u.hostname}:${u.port}`; }
+  catch { return "(unparseable URL)"; }
+}
+
+// Warn loudly if we're falling back to localhost — this will always fail on Railway
+if (!redisUrl && !redisHost) {
+  logger.warn(
+    "No Redis connection env vars found — falling back to 127.0.0.1:6379. " +
+    "On Railway, set REDIS_URL = ${{Redis.REDIS_URL}} in your app service Variables tab."
+  );
+}
+
+logger.debug("Redis connection resolved", { target: safeConnectionDesc });
 
 // ── Client ───────────────────────────────────────────────────────────────────
 
+const sharedOptions = {
+  maxRetriesPerRequest: 3,
+  lazyConnect: true,
+  retryStrategy: (times: number) => {
+    const delay = Math.min(times * 50, 2000);
+    logger.warn("Redis connection retry", { attempt: times, nextDelayMs: delay, target: safeConnectionDesc });
+    return delay;
+  },
+};
+
 export const redis = redisUrl
-  ? new Redis(redisUrl, {
-      maxRetriesPerRequest: 3,
-      lazyConnect: true,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        logger.warn("Redis connection retry", { attempt: times, nextDelayMs: delay, target: safeConnectionDesc });
-        return delay;
-      },
-    })
+  ? new Redis(redisUrl, sharedOptions)
   : new Redis({
-      host: redisHost,
+      host: redisHost || "127.0.0.1",
       port: redisPort,
-      maxRetriesPerRequest: 3,
-      lazyConnect: true,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        logger.warn("Redis connection retry", { attempt: times, nextDelayMs: delay, target: safeConnectionDesc });
-        return delay;
-      },
+      password: redisPassword,
+      ...sharedOptions,
     });
 
 // ── Lifecycle events ─────────────────────────────────────────────────────────

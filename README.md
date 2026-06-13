@@ -101,7 +101,7 @@ This project goes further. It builds a rate limiter that **adapts in real time**
 
 ```mermaid
 graph TD
-    Client(["Client"]) -->|API Request| GW["API Gateway"]
+    Client["Client"] -->|API Request| GW["API Gateway"]
 
     GW --> Cluster
 
@@ -111,11 +111,11 @@ graph TD
         I3["Instance 3"]
     end
 
-    Cluster -->|Atomic check/update via Lua| Redis[("Redis\n(Token Buckets)")]
-    Cluster -->|O(1) in-memory lookup| Config["Config Service\n(Tier Rules)"]
-    Cluster -->|Rolling window| Monitor["Metrics Collector"]
+    Cluster -->|Atomic check/update via Lua| Redis["Redis - Token Buckets"]
+    Cluster -->|O(1) lookup| Config["Config Service - Tier Rules"]
+    Cluster -->|Rolling window metrics| Monitor["Metrics Collector"]
 
-    Monitor --> Adaptive["Adaptive Throttler\n(background)"]
+    Monitor --> Adaptive["Adaptive Throttler"]
     Adaptive -->|Update factor| Cluster
 
     Admin["Admin Dashboard"] -->|REST API| Config

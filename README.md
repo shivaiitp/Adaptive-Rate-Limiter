@@ -101,25 +101,35 @@ This project goes further. It builds a rate limiter that **adapts in real time**
 
 ```mermaid
 graph TD
+
     Client["Client"] -->|API Request| GW["API Gateway"]
+    GW --> I1
+    GW --> I2
+    GW --> I3
 
-    GW --> Cluster
-
-    subgraph Cluster["Rate Limiter Cluster (stateless)"]
+    subgraph "Rate Limiter Cluster"
         I1["Instance 1"]
         I2["Instance 2"]
         I3["Instance 3"]
     end
 
-    Cluster -->|Atomic check/update via Lua| Redis["Redis - Token Buckets"]
-    Cluster -->|O(1) lookup| Config["Config Service - Tier Rules"]
-    Cluster -->|Rolling window metrics| Monitor["Metrics Collector"]
+    I1 -->|Redis Lua| Redis[(Redis)]
+    I2 -->|Redis Lua| Redis
+    I3 -->|Redis Lua| Redis
+
+    I1 --> Config["Config Service"]
+    I2 --> Config
+    I3 --> Config
+
+    I1 --> Monitor["Metrics Collector"]
+    I2 --> Monitor
+    I3 --> Monitor
 
     Monitor --> Adaptive["Adaptive Throttler"]
-    Adaptive -->|Update factor| Cluster
+    Adaptive --> Config
 
-    Admin["Admin Dashboard"] -->|REST API| Config
-    Admin -->|View metrics| Monitor
+    Admin["Admin Dashboard"] --> Config
+    Admin --> Monitor
 ```
 
 > Requests hit stateless Rate Limiter instances that share state only through Redis. The Admin Dashboard updates configs at runtime without restarting anything.
